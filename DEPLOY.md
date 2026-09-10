@@ -69,6 +69,30 @@ APP_TRUST_PROXY=1
 workstation, not the server.** Keeping them off the box means a compromise of
 the web host does not hand over your warehouse token.
 
+### One exception: warehouse pre-warm
+
+`DATABRICKS_WARM_TOKEN` is the only Databricks credential worth putting on the
+web host. It lets the server submit `SELECT 1` on sign-in and on conversation
+start, so a cold warehouse is booting before the first real lookup arrives.
+
+Because `SELECT 1` reads no table, give this token **only `CAN_USE` on the
+warehouse and no catalog grants** — a service principal with nothing else
+attached. Then a compromise of the web host yields the ability to start a
+warehouse and nothing more.
+
+```ini
+DATABRICKS_HOST=https://adb-xxxx.N.azuredatabricks.net
+DATABRICKS_WAREHOUSE_ID=<warehouse id>
+DATABRICKS_WARM_TOKEN=<minimal service principal token>
+DATABRICKS_WARM_MINUTES=10
+```
+
+It falls back to `DATABRICKS_TOKEN` if unset. That works, but puts a
+data-capable token on the web host — defeating the split above. Leave both
+unset to disable pre-warming.
+
+Confirm it in the log: `WARM warehouse PENDING (login)`.
+
 ## Install
 
 ```sh

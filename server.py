@@ -19,6 +19,8 @@ import json
 import mimetypes
 import os
 import sys
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -64,6 +66,74 @@ TOKEN_LIMITER = auth.RateLimiter(auth.token_limit())
 # Failed logins are capped per source address to make guessing impractical.
 LOGIN_LIMITER = auth.RateLimiter(
     int(os.environ.get("APP_LOGIN_ATTEMPTS", "10") or 10), window_secs=900)
+
+# ---- Databricks warehouse pre-warm ---------------------------------------
+# A cold serverless warehouse takes 10-15s to answer its first query, which is
+# long enough to blow the tool timeout and tell the caller "I encountered an
+# error". Starting a conversation is a reliable signal that a lookup is coming,
+# so submit a throwaway query then and let the warehouse boot in parallel with
+# the greeting.
+#
+# SELECT 1 touches no table, so the credential used here needs only CAN_USE on
+# the warehouse and no catalog grants at all. Use a service principal with
+# nothing else granted: the worst an attacker can do with it is start a
+# warehouse. Leave DATABRICKS_WARM_TOKEN unset to disable pre-warming entirely.
+DBX_HOST = os.environ.get("DATABRICKS_HOST", "").strip().rstrip("/")
+DBX_WAREHOUSE = os.environ.get("DATABRICKS_WAREHOUSE_ID", "").strip()
+DBX_WARM_TOKEN = (os.environ.get("DATABRICKS_WARM_TOKEN", "").strip()
+                  or os.environ.get("DATABRICKS_TOKEN", "").strip())
+try:
+    WARM_EVERY = max(0, int(os.environ.get("DATABRICKS_WARM_MINUTES", "10") or 10)) * 60
+except ValueError:
+    WARM_EVERY = 600
+WARM_READY = bool(DBX_HOST and DBX_WAREHOUSE and DBX_WARM_TOKEN)
+
+_warm_lock = threading.Lock()
+_warm_last = 0.0
+
+
+def warm_warehouse(reason: str) -> None:
+    """Nudge the SQL warehouse awake, off the request path.
+
+    Debounced, because several sessions starting together should cost one
+    query, and fire-and-forget: wait_timeout=0s makes Databricks return PENDING
+    immediately, so nothing here delays the caller's connection.
+    """
+    global _warm_last
+    if not WARM_READY:
+        return
+    with _warm_lock:
+        if time.time() - _warm_last < WARM_EVERY:
+            return
+        _warm_last = time.time()
+
+    def run() -> None:
+        body = json.dumps({
+            "warehouse_id": DBX_WAREHOUSE,
+            "statement": "SELECT 1",
+            "wait_timeout": "0s",
+            "disposition": "INLINE",
+            "format": "JSON_ARRAY",
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            DBX_HOST + "/api/2.0/sql/statements/", data=body, method="POST",
+            headers={
+                "Authorization": "Bearer " + DBX_WARM_TOKEN,
+                "Content-Type": "application/json",
+                # A CDN in front of the warehouse may reject a default
+                # Python-urllib agent, as one did in front of the LLM.
+                "User-Agent": "Mozilla/5.0 (compatible) elevenlabs-webui/1.0",
+            })
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                state = (json.loads(resp.read().decode("utf-8") or "{}")
+                         .get("status") or {}).get("state")
+            sys.stderr.write("  WARM warehouse %s (%s)\n" % (state, reason))
+        except Exception as exc:  # noqa: BLE001 - never affect the request
+            sys.stderr.write("  WARM failed: %s (%s)\n" % (exc, reason))
+
+    threading.Thread(target=run, daemon=True, name="dbx-warm").start()
+
 
 CSP = os.environ.get("APP_CSP", "on").strip().lower() not in ("off", "0", "false")
 
@@ -304,6 +374,10 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         sys.stderr.write("  AUDIT user=%s ip=%s login_ok\n" % (username, self._client()))
+        # Signing in usually precedes a call by seconds, so start the warehouse
+        # now for the extra head start. Debounced, so this costs nothing when
+        # the session-start warm-up has already run.
+        warm_warehouse("login")
         cookie = "%s=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Strict%s" % (
             auth.SESSION_COOKIE, auth.issue_session(username),
             auth.session_lifetime(), "" if INSECURE_COOKIE else "; Secure")
@@ -355,6 +429,8 @@ class Handler(BaseHTTPRequestHandler):
                     429, "Conversation limit reached (%d per hour). Try again later."
                     % auth.token_limit())
             self._audit("mint", "%s agent=%s remaining=%d" % (route, agent_id, remaining))
+            # The caller is seconds away from a lookup; boot the warehouse now.
+            warm_warehouse("session start")
 
         if route == "/api/conversation-token":
             if not agent_id:
@@ -416,6 +492,9 @@ def main() -> int:
     print("  Users   : " + ", ".join(sorted(auth.users())))
     print("  Limits  : %d conversations/user/hour" % auth.token_limit())
     print("  CSP     : " + ("on" if CSP else "off"))
+    print("  Warm-up : " + ("warehouse %s, at most every %d min"
+                            % (DBX_WAREHOUSE, WARM_EVERY // 60) if WARM_READY
+                            else "off (set DATABRICKS_WARM_TOKEN to enable)"))
     if auth.using_demo_account():
         print("")
         print("  Using the BUILT-IN DEMO ACCOUNT (%s)." % auth.DEMO_USER)

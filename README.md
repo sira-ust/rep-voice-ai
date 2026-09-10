@@ -133,6 +133,28 @@ python configure_llm.py --apply --update-secret  # also rotate the stored key
 (named by `CUSTOM_LLM_SECRET_NAME`) and points the agent's `custom_llm` at your
 URL. It re-reads the agent afterwards and fails loudly if the change didn't stick.
 
+### Cold warehouse pre-warm
+
+A cold serverless SQL warehouse takes 10-15s to answer its first query — long
+enough to blow the tool timeout and have the agent tell the caller *"I
+encountered an error"*. Set `DATABRICKS_WARM_TOKEN` and the server submits
+`SELECT 1` when a user signs in and when a conversation starts, so the
+warehouse boots while the agent is still greeting them.
+
+It is fire-and-forget (`wait_timeout=0s`, returns `PENDING` in ~1s on a
+background thread, so nothing delays the caller) and debounced to at most one
+query per `DATABRICKS_WARM_MINUTES`.
+
+`SELECT 1` reads no table, so **this credential needs only `CAN_USE` on the
+warehouse and no catalog grants at all.** Use a service principal with nothing
+else granted; the worst it can do is start a warehouse. It falls back to
+`DATABRICKS_TOKEN`, which is convenient but puts a data-capable token on the
+web host — see [DEPLOY.md](DEPLOY.md).
+
+This shortens the cold path; it does not remove it. Raising the warehouse
+auto-stop window, or serving the table from a Lakebase synced table, are the
+real fixes.
+
 ### Requirements for the LLM endpoint
 
 - **Publicly reachable.** ElevenLabs' servers call it, not your browser. A
