@@ -22,6 +22,10 @@ The key is read by `server.py` only. It is never written into the HTML, never se
 to the browser, and `.env` is git-ignored. The browser only ever receives a
 short-lived conversation token minted per call.
 
+> Deploying this on a server? See **[DEPLOY.md](DEPLOY.md)**. Two things there
+> are not optional: the microphone needs HTTPS, and `/api/conversation-token`
+> spends ElevenLabs credits and has no authentication of its own.
+
 ## Run
 
 ```sh
@@ -184,6 +188,13 @@ and re-reads afterwards to confirm the change stuck.
 | [test_conversation.py](test_conversation.py) | A scripted multi-turn conversation, plus the tool calls it made |
 | [test_phrasings.py](test_phrasings.py) | A batch of phrasings: which tool each routed to, and whether rows came back |
 | [analyze_call.py](analyze_call.py) | Per-turn latency breakdown for a past call |
+
+**Docs**
+
+| Path | What it is |
+| --- | --- |
+| [DEPLOY.md](DEPLOY.md) | Running this on Linux behind TLS |
+| [agent_prompt.md](agent_prompt.md) | The agent's system prompt, uploaded by configure_prompt.py |
 
 ## Server endpoints
 
