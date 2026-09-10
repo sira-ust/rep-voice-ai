@@ -105,12 +105,21 @@ function renderDebugStats() {
 // ---------------------------------------------------------------- utilities
 
 async function getJSON(url) {
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
+    credentials: "same-origin",
+  });
   let body = {};
   try {
     body = await res.json();
   } catch {
     /* non-JSON error page */
+  }
+  // A session can expire mid-call. Send the user back to sign in rather than
+  // showing them a bare "Not signed in" they cannot act on.
+  if (res.status === 401 && body.login) {
+    window.location.href = body.login;
+    throw new Error("Session expired — signing in again.");
   }
   if (!res.ok) throw new Error(body.error || `${res.status} ${res.statusText}`);
   return body;
@@ -614,7 +623,9 @@ async function init() {
     return;
   }
 
-  el.keyNote.textContent = `API key loaded from .env (${state.config.apiKeyHint}). It stays on the server.`;
+  el.keyNote.textContent = state.config.user
+    ? `Signed in as ${state.config.user}. The API key stays on the server.`
+    : "The API key stays on the server and is never sent to this page.";
 
   // Populate the agent picker.
   try {

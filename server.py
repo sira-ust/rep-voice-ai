@@ -23,8 +23,11 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import webbrowser
+import http.cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+import auth
 
 ROOT = Path(__file__).resolve().parent
 PUBLIC = ROOT / "public"
@@ -54,6 +57,54 @@ load_dotenv(ROOT / ".env")
 
 API_KEY = os.environ.get("ELEVENLABS_API_KEY", "").strip()
 AGENT_ID = os.environ.get("ELEVENLABS_AGENT_ID", "").strip()
+
+# Minting a conversation token starts a billable ElevenLabs conversation, so it
+# is capped per user even after they have authenticated.
+TOKEN_LIMITER = auth.RateLimiter(auth.token_limit())
+# Failed logins are capped per source address to make guessing impractical.
+LOGIN_LIMITER = auth.RateLimiter(
+    int(os.environ.get("APP_LOGIN_ATTEMPTS", "10") or 10), window_secs=900)
+
+CSP = os.environ.get("APP_CSP", "on").strip().lower() not in ("off", "0", "false")
+
+# Behind a reverse proxy, X-Forwarded-For is the real client. Off by default:
+# trusting that header when nothing sets it lets a caller forge their own IP
+# and walk straight past the login rate limit.
+TRUST_PROXY = os.environ.get("APP_TRUST_PROXY", "").strip().lower() in ("1", "true", "on")
+
+# Session cookies are Secure, so a browser will not send them back over plain
+# HTTP. Set APP_INSECURE_COOKIE=1 for local development on http://127.0.0.1.
+INSECURE_COOKIE = os.environ.get("APP_INSECURE_COOKIE", "").strip().lower() in ("1", "true", "on")
+
+# No users configured means no way to sign in. Refuse to serve anything rather
+# than falling back to open access.
+AUTH_READY = bool(auth.users())
+
+LOCKED_PAGE = (
+    b"<!doctype html><meta charset=utf-8><title>Not configured</title>"
+    b"<body style=\"font:15px system-ui;max-width:34em;margin:12vh auto;padding:0 1em\">"
+    b"<h1 style=\"font-size:18px\">Authentication is not configured</h1>"
+    b"<p>This server will not serve the agent UI until at least one user exists, "
+    b"because the endpoints it exposes can spend ElevenLabs credits.</p>"
+    b"<pre style=\"background:#f2f3f5;padding:.8em;border-radius:6px\">"
+    b"python auth.py --secret\npython auth.py --add-user rep</pre>"
+    b"<p>Put both lines in <code>.env</code> and restart.</p>")
+
+# The browser loads the SDK from jsDelivr and talks to ElevenLabs directly, so
+# both have to be allowed. blob: is required: the SDK builds its AudioWorklet
+# from a blob URL, and revoking that permission silently kills the microphone.
+CSP_POLICY = (
+    "default-src 'self'; "
+    "script-src 'self' blob: https://cdn.jsdelivr.net; "
+    "worker-src 'self' blob:; "
+    "child-src 'self' blob:; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "media-src 'self' blob: mediastream:; "
+    "connect-src 'self' https://cdn.jsdelivr.net https://api.elevenlabs.io "
+    "wss://api.elevenlabs.io https://*.elevenlabs.io wss://*.elevenlabs.io; "
+    "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+)
 
 
 class UpstreamError(Exception):
@@ -115,11 +166,20 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         sys.stderr.write("  %s\n" % (fmt % args))
 
-    def _send(self, status: int, body: bytes, content_type: str) -> None:
+    def _send(self, status: int, body: bytes, content_type: str,
+              extra: list | None = None) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Permissions-Policy", "microphone=(self), camera=(), geolocation=()")
+        if CSP:
+            self.send_header("Content-Security-Policy", CSP_POLICY)
+        for name, value in (extra or []):
+            self.send_header(name, value)
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
@@ -128,12 +188,67 @@ class Handler(BaseHTTPRequestHandler):
         raw = json.dumps(payload).encode("utf-8")
         self._send(status, raw, "application/json; charset=utf-8")
 
+    # ---------- identity ----------
+
+    def _client(self) -> str:
+        """Source address, honouring one proxy hop if configured."""
+        if TRUST_PROXY:
+            fwd = self.headers.get("X-Forwarded-For", "")
+            if fwd:
+                return fwd.split(",")[0].strip()
+        return self.client_address[0]
+
+    def _user(self) -> str | None:
+        raw = self.headers.get("Cookie", "")
+        if not raw:
+            return None
+        try:
+            jar = http.cookies.SimpleCookie()
+            jar.load(raw)
+        except http.cookies.CookieError:
+            return None
+        morsel = jar.get(auth.SESSION_COOKIE)
+        return auth.read_session(morsel.value) if morsel else None
+
+    def _audit(self, action: str, detail: str = "") -> None:
+        sys.stderr.write("  AUDIT user=%s ip=%s %s %s\n" % (
+            self._user() or "-", self._client(), action, detail))
+
+    def _redirect(self, location: str, extra: list | None = None) -> None:
+        self._send(303, b"", "text/plain; charset=utf-8",
+                   [("Location", location)] + (extra or []))
+
     # ---------- routing ----------
 
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
         route = parsed.path.rstrip("/") or "/"
         query = urllib.parse.parse_qs(parsed.query)
+
+        if route == "/login":
+            if self._user():
+                self._redirect("/")
+            else:
+                self._send(200, auth.login_page(), "text/html; charset=utf-8")
+            return
+
+        if route == "/logout":
+            self._audit("logout")
+            self._redirect("/login", [(
+                "Set-Cookie",
+                "%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict" % auth.SESSION_COOKIE)])
+            return
+
+        # Everything past here needs a session.
+        if not AUTH_READY:
+            self._send(503, LOCKED_PAGE, "text/html; charset=utf-8")
+            return
+        if not self._user():
+            if route.startswith("/api"):
+                self._json(401, {"error": "Not signed in.", "login": "/login"})
+            else:
+                self._redirect("/login")
+            return
 
         if route.startswith("/api"):
             try:
@@ -149,17 +264,57 @@ class Handler(BaseHTTPRequestHandler):
 
     do_HEAD = do_GET
 
+    def do_POST(self) -> None:
+        route = urllib.parse.urlparse(self.path).path.rstrip("/") or "/"
+        if route != "/login":
+            self._send(404, b"Not found", "text/plain; charset=utf-8")
+            return
+        if not AUTH_READY:
+            self._send(503, LOCKED_PAGE, "text/html; charset=utf-8")
+            return
+
+        allowed, _ = LOGIN_LIMITER.check("login:" + self._client())
+        if not allowed:
+            self._audit("login_throttled")
+            self._send(429, auth.login_page("Too many attempts. Wait 15 minutes."),
+                       "text/html; charset=utf-8")
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length <= 0 or length > 4096:
+            self._send(400, auth.login_page("Bad request."), "text/html; charset=utf-8")
+            return
+
+        form = urllib.parse.parse_qs(self.rfile.read(length).decode("utf-8", "replace"))
+        username = (form.get("username", [""])[0] or "").strip()
+        password = form.get("password", [""])[0] or ""
+
+        if not auth.authenticate(username, password):
+            sys.stderr.write("  AUDIT user=%s ip=%s login_failed\n"
+                             % (username or "-", self._client()))
+            self._send(401, auth.login_page("Wrong user name or password."),
+                       "text/html; charset=utf-8")
+            return
+
+        sys.stderr.write("  AUDIT user=%s ip=%s login_ok\n" % (username, self._client()))
+        cookie = "%s=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Strict%s" % (
+            auth.SESSION_COOKIE, auth.issue_session(username),
+            auth.session_lifetime(), "" if INSECURE_COOKIE else "; Secure")
+        self._redirect("/", [("Set-Cookie", cookie)])
+
     def _handle_api(self, route: str, query: dict) -> None:
         agent_id = (query.get("agent_id", [AGENT_ID])[0] or AGENT_ID).strip()
 
         if route == "/api/config":
-            hint = ""
-            if len(API_KEY) > 12:
-                hint = API_KEY[:4] + "..." + API_KEY[-4:]
+            # Deliberately no fragment of the API key: eight characters of a
+            # credential is eight characters an attacker does not have to guess.
             self._json(200, {
                 "agentId": AGENT_ID,
                 "hasApiKey": bool(API_KEY),
-                "apiKeyHint": hint,
+                "user": self._user(),
             })
             return
 
@@ -186,6 +341,16 @@ class Handler(BaseHTTPRequestHandler):
                 "customLlmModel": custom.get("model_id"),
             })
             return
+
+        if route in ("/api/conversation-token", "/api/signed-url"):
+            user = self._user() or "-"
+            allowed, remaining = TOKEN_LIMITER.check("tok:" + user)
+            if not allowed:
+                self._audit("token_throttled", route)
+                raise UpstreamError(
+                    429, "Conversation limit reached (%d per hour). Try again later."
+                    % auth.token_limit())
+            self._audit("mint", "%s agent=%s remaining=%d" % (route, agent_id, remaining))
 
         if route == "/api/conversation-token":
             if not agent_id:
@@ -244,6 +409,21 @@ def main() -> int:
     print("  " + url)
     print("  API key : " + key_state)
     print("  Agent   : " + (AGENT_ID or "not set -- pick one in the UI"))
+    print("  Users   : " + (", ".join(sorted(auth.users())) or "NONE -- see below"))
+    print("  Limits  : %d conversations/user/hour" % auth.token_limit())
+    print("  CSP     : " + ("on" if CSP else "off"))
+    if not AUTH_READY:
+        print("")
+        print("  Refusing to serve the UI: no users configured.")
+        print("    python auth.py --secret       -> APP_SECRET=...")
+        print("    python auth.py --add-user rep -> APP_USERS=...")
+        print("  Put both in .env and restart.")
+    elif not os.environ.get("APP_SECRET", "").strip():
+        print("  WARNING : APP_SECRET is unset, so sessions die on restart.")
+        print("            python auth.py --secret")
+    if AUTH_READY and not INSECURE_COOKIE and args.host in ("127.0.0.1", "localhost"):
+        print("  NOTE    : cookies are Secure-only. For plain-HTTP localhost testing,")
+        print("            set APP_INSECURE_COOKIE=1 in .env.")
     print("  Ctrl+C to stop")
     print("")
 

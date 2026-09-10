@@ -26,6 +26,35 @@ short-lived conversation token minted per call.
 > are not optional: the microphone needs HTTPS, and `/api/conversation-token`
 > spends ElevenLabs credits and has no authentication of its own.
 
+## Sign-in is required
+
+The server refuses to serve the UI until at least one user exists — it returns
+503 with setup instructions rather than defaulting to open access. Every
+`/api/*` route and the page itself need a session.
+
+```sh
+python auth.py --secret          # -> APP_SECRET=...   signs session cookies
+python auth.py --add-user rep    # prompts, -> APP_USERS=...
+```
+
+Put both lines in `.env` and restart. Then, for local plain-HTTP testing only,
+add `APP_INSECURE_COOKIE=1` — session cookies are otherwise `Secure` and a
+browser will not send them back over `http://`.
+
+What this buys you:
+
+| | |
+| --- | --- |
+| Passwords | scrypt hashes, ~65 ms to verify. Plaintext is never accepted |
+| Sessions | HMAC-signed cookie, `HttpOnly` + `Secure` + `SameSite=Strict` |
+| Conversation cap | `APP_TOKENS_PER_HOUR` per user — each conversation costs credits |
+| Sign-in cap | `APP_LOGIN_ATTEMPTS` failures per source address per 15 min |
+| Audit log | `login_ok`, `login_failed`, `mint`, `token_throttled`, `logout` to stderr |
+| Headers | CSP, `X-Frame-Options: DENY`, `nosniff`, `no-referrer`, `Permissions-Policy` |
+
+`/api/config` deliberately returns no fragment of the API key. Rotating
+`APP_SECRET` invalidates every session immediately.
+
 ## Run
 
 ```sh
@@ -188,6 +217,7 @@ and re-reads afterwards to confirm the change stuck.
 | [test_conversation.py](test_conversation.py) | A scripted multi-turn conversation, plus the tool calls it made |
 | [test_phrasings.py](test_phrasings.py) | A batch of phrasings: which tool each routed to, and whether rows came back |
 | [analyze_call.py](analyze_call.py) | Per-turn latency breakdown for a past call |
+| [auth.py](auth.py) | Password hashing, sessions, rate limits — plus the CLI above |
 
 **Docs**
 

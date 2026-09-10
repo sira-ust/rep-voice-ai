@@ -15,10 +15,11 @@ moment the page is served from a hostname or LAN IP over plain HTTP, the mic is
 silently unavailable and the agent hears nothing. **A TLS reverse proxy is not
 optional.**
 
-**2. `/api/conversation-token` spends money.** It mints ElevenLabs conversation
-tokens using your API key. There is no authentication in `server.py`. Anyone who
-can reach that endpoint can start conversations and burn your credits. Put
-authentication in front of it, or keep it on a private network.
+**2. `/api/conversation-token` spends money.** Every call starts a billable
+ElevenLabs conversation. `server.py` now requires a signed-in session for the
+page and every `/api/*` route, and caps conversations per user per hour — but it
+refuses to serve anything at all until you configure a user, so do that before
+you expect the service to come up.
 
 ## Requirements
 
@@ -40,7 +41,8 @@ python3 --version
 
 ElevenLabs calls your LLM and Databricks **directly**, authenticated by secrets
 stored in your ElevenLabs workspace. Those tokens never pass through this
-server. So the deployed `.env` only needs two values:
+server, so the deployed `.env` holds one upstream credential — the ElevenLabs
+API key — plus this app's own sign-in settings:
 
 ```ini
 # /opt/rep-voice-ai/.env  -- runtime
@@ -48,6 +50,16 @@ ELEVENLABS_API_KEY=sk_...
 ELEVENLABS_AGENT_ID=agent_...
 HOST=127.0.0.1
 PORT=8080
+
+APP_SECRET=<from auth.py --secret>
+APP_USERS=rep:scrypt$...
+APP_SESSION_HOURS=12
+APP_TOKENS_PER_HOUR=30
+
+# Only because a reverse proxy sets X-Forwarded-For. Without a proxy, leave
+# this unset -- otherwise a caller can forge their source address and walk past
+# the sign-in rate limit.
+APP_TRUST_PROXY=1
 ```
 
 `DATABRICKS_TOKEN`, `CUSTOM_LLM_API_KEY` and the rest are only used by the
@@ -64,7 +76,25 @@ sudo git clone https://github.com/sira-ust/rep-voice-ai.git /opt/rep-voice-ai
 sudo chown -R voiceai:voiceai /opt/rep-voice-ai
 ```
 
-Create the runtime `.env` and lock it down — it holds a live API key:
+### Credentials for signing in
+
+The server will not serve the UI with no users configured — it returns 503 with
+setup instructions rather than falling back to open access. Generate both values
+on the server (the hash is salted, so generate it wherever you like):
+
+```sh
+cd /opt/rep-voice-ai
+sudo -u voiceai python3 auth.py --secret          # -> APP_SECRET=...
+sudo -u voiceai python3 auth.py --add-user rep    # prompts, -> APP_USERS=...
+```
+
+`--add-user` prints the whole `APP_USERS` line including any existing entries,
+so adding a second person is the same command again. Passwords are stored as
+scrypt hashes; plaintext is never accepted.
+
+### Runtime .env
+
+Create it and lock it down — it holds a live API key:
 
 ```sh
 sudo -u voiceai cp /opt/rep-voice-ai/.env.example /opt/rep-voice-ai/.env
@@ -116,8 +146,23 @@ systemctl status rep-voice-ai
 curl -s localhost:8080/api/config      # {"agentId": "...", "hasApiKey": true, ...}
 ```
 
+The startup banner reports the security posture — configured users, the
+per-user conversation cap, and whether CSP is on. Check it:
+
+```sh
+journalctl -u rep-voice-ai -n 20
+```
+
 `hasApiKey: false` means the `.env` was not read — check the path and that the
-`voiceai` user can read it.
+`voiceai` user can read it. A 503 with "Authentication is not configured" means
+`APP_USERS` is empty.
+
+Unauthenticated requests should be refused before you go any further:
+
+```sh
+curl -si localhost:8080/ | head -2                    # 303, Location: /login
+curl -s  localhost:8080/api/conversation-token         # 401 Not signed in
+```
 
 ## TLS reverse proxy
 
@@ -127,18 +172,17 @@ curl -s localhost:8080/api/config      # {"agentId": "...", "hasApiKey": true, .
 
 ```caddyfile
 voice.example.com {
-    # Everything behind a login. Without this, anyone can spend your credits.
-    basic_auth {
-        rep $2a$14$REPLACE_WITH_HASH_FROM_caddy_hash-password
-    }
     reverse_proxy 127.0.0.1:8080
 }
 ```
 
 ```sh
-caddy hash-password            # paste the result above
 sudo systemctl reload caddy
 ```
+
+The app authenticates its own users now, so proxy-level basic auth is optional.
+Add it only if you want a second, independent gate — be aware it means two
+password prompts.
 
 ### nginx
 
@@ -149,9 +193,6 @@ server {
 
     ssl_certificate     /etc/letsencrypt/live/voice.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/voice.example.com/privkey.pem;
-
-    auth_basic           "Voice agent";
-    auth_basic_user_file /etc/nginx/.htpasswd;
 
     location / {
         proxy_pass       http://127.0.0.1:8080;
@@ -169,7 +210,6 @@ server {
 ```
 
 ```sh
-sudo htpasswd -c /etc/nginx/.htpasswd rep
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
@@ -257,11 +297,22 @@ before.
 | Agent connects, speaks its opener, then dies | The LLM leg — see the "custom_llm generation failed" section in [README.md](README.md) |
 | Connects but never hears you | `mic-out` at 0 in the event log means audio is not being captured or sent |
 | Tool calls time out | Cold Databricks warehouse; raise `DATABRICKS_TOOL_TIMEOUT` and re-sync |
+| 503 "Authentication is not configured" | `APP_USERS` is empty — run `auth.py --add-user` |
+| Sign-in succeeds then bounces back to /login | Cookies are `Secure`; you are on plain HTTP. Fix TLS, or set `APP_INSECURE_COOKIE=1` for local testing only |
+| Everyone signed out after a restart | `APP_SECRET` unset, so a new one is generated each boot |
+| 429 on starting a conversation | Per-user hourly cap; raise `APP_TOKENS_PER_HOUR` |
 
-Logs:
+Logs, including the audit trail of sign-ins and every conversation started:
 
 ```sh
 journalctl -u rep-voice-ai -f
+journalctl -u rep-voice-ai | grep AUDIT
+```
+
+```
+AUDIT user=rep ip=10.0.0.14 login_ok
+AUDIT user=rep ip=10.0.0.14 mint /api/conversation-token agent=agent_... remaining=28
+AUDIT user=rep ip=10.0.0.14 token_throttled /api/conversation-token
 ```
 
 ## What this deployment does not do
@@ -270,8 +321,9 @@ journalctl -u rep-voice-ai -f
   concurrent users minting tokens; it is not a production web server. The heavy
   lifting is all in ElevenLabs' cloud, so this rarely matters — but do not put
   it in front of hundreds of users without measuring.
-- **No per-user identity.** Basic auth at the proxy is all-or-nothing. Every
-  authenticated user shares one agent and one set of credentials, and
-  conversations are not attributed to individuals.
-- **No rate limiting.** An authenticated user can open unlimited conversations.
-  Add a `limit_req` zone in nginx if that matters.
+- **Sessions are stateless.** There is no way to revoke one user without
+  rotating `APP_SECRET`, which signs everyone out.
+- **Rate limits are per process.** Fine for one instance; run two and each keeps
+  its own counters, so the effective cap doubles.
+- **Users share one agent and one ElevenLabs account.** Sign-ins are attributed
+  in the audit log, but ElevenLabs conversations are not tagged per user.
