@@ -93,8 +93,22 @@ def verify_password(password: str, stored: str) -> bool:
     return hmac.compare_digest(actual, expected)
 
 
+# A built-in account so the app runs straight after a clone, with no setup.
+#
+# This is a DEMO credential and it is not a secret: the hash lives in a shared
+# repository, and the password behind it is short enough that recovering it from
+# the hash is trivial. Treat "anyone who can read this repo can sign in" as the
+# actual security posture.
+#
+# Setting APP_USERS in .env replaces this account entirely -- that is how you
+# turn the demo account off:
+#     python auth.py --add-user rep
+DEMO_USER = "testuser"
+DEMO_HASH = "scrypt$JB0cogC7bHFgw-s1r0feAQ$-wKATxA0fHfMnQA8-PkNGjdydOeRDEDnzqfVAti57Ao"
+
+
 def users() -> dict:
-    """APP_USERS as "name:hash,name:hash". Empty means auth is not configured."""
+    """APP_USERS as "name:hash,name:hash", falling back to the demo account."""
     raw = os.environ.get("APP_USERS", "").strip()
     out = {}
     for entry in raw.split(","):
@@ -105,7 +119,12 @@ def users() -> dict:
         name = name.strip()
         if name and stored.strip():
             out[name] = stored.strip()
-    return out
+    return out or {DEMO_USER: DEMO_HASH}
+
+
+def using_demo_account() -> bool:
+    """True when no real users are configured, so callers can say so loudly."""
+    return not os.environ.get("APP_USERS", "").strip()
 
 
 def authenticate(username: str, password: str) -> bool:

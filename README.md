@@ -28,18 +28,36 @@ short-lived conversation token minted per call.
 
 ## Sign-in is required
 
-The server refuses to serve the UI until at least one user exists — it returns
-503 with setup instructions rather than defaulting to open access. Every
-`/api/*` route and the page itself need a session.
+The page and every `/api/*` route need a session. A built-in account works out
+of the box, so `python server.py` is all you need to get going:
+
+| | |
+| --- | --- |
+| User | `testuser` |
+| Password | `ustuser!` |
+
+> **This is a demo credential, not a secret.** Its hash sits in
+> [auth.py](auth.py) in this repository, and the password is short enough that
+> recovering it from the hash is trivial. The real posture is *anyone who can
+> read this repo can sign in.* Replace it before the app is reachable by anyone
+> you would not hand the password to:
+>
+> ```sh
+> python auth.py --add-user rep    # -> APP_USERS=... in .env
+> ```
+>
+> Setting `APP_USERS` replaces the built-in account entirely. The startup
+> banner says loudly which one is active.
+
+Also worth setting, though neither is required:
 
 ```sh
-python auth.py --secret          # -> APP_SECRET=...   signs session cookies
-python auth.py --add-user rep    # prompts, -> APP_USERS=...
+python auth.py --secret          # -> APP_SECRET=...  or sessions die on restart
 ```
 
-Put both lines in `.env` and restart. Then, for local plain-HTTP testing only,
-add `APP_INSECURE_COOKIE=1` — session cookies are otherwise `Secure` and a
-browser will not send them back over `http://`.
+Cookies are `Secure`, which means a browser withholds them over plain HTTP.
+The server relaxes that automatically when bound to loopback — so
+`http://127.0.0.1:8080` just works — and keeps it on everywhere else.
 
 What this buys you:
 

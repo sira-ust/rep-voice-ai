@@ -73,8 +73,12 @@ CSP = os.environ.get("APP_CSP", "on").strip().lower() not in ("off", "0", "false
 TRUST_PROXY = os.environ.get("APP_TRUST_PROXY", "").strip().lower() in ("1", "true", "on")
 
 # Session cookies are Secure, so a browser will not send them back over plain
-# HTTP. Set APP_INSECURE_COOKIE=1 for local development on http://127.0.0.1.
-INSECURE_COOKIE = os.environ.get("APP_INSECURE_COOKIE", "").strip().lower() in ("1", "true", "on")
+# HTTP -- which makes a loopback login silently fail to stick. Relaxed
+# automatically when bound to loopback (main() does this); anywhere else it
+# stays on unless APP_INSECURE_COOKIE says otherwise.
+_INSECURE_ENV = os.environ.get("APP_INSECURE_COOKIE", "").strip().lower()
+INSECURE_COOKIE = _INSECURE_ENV in ("1", "true", "on")
+_INSECURE_SET_EXPLICITLY = _INSECURE_ENV != ""
 
 # No users configured means no way to sign in. Refuse to serve anything rather
 # than falling back to open access.
@@ -409,21 +413,27 @@ def main() -> int:
     print("  " + url)
     print("  API key : " + key_state)
     print("  Agent   : " + (AGENT_ID or "not set -- pick one in the UI"))
-    print("  Users   : " + (", ".join(sorted(auth.users())) or "NONE -- see below"))
+    print("  Users   : " + ", ".join(sorted(auth.users())))
     print("  Limits  : %d conversations/user/hour" % auth.token_limit())
     print("  CSP     : " + ("on" if CSP else "off"))
-    if not AUTH_READY:
+    if auth.using_demo_account():
         print("")
-        print("  Refusing to serve the UI: no users configured.")
-        print("    python auth.py --secret       -> APP_SECRET=...")
-        print("    python auth.py --add-user rep -> APP_USERS=...")
-        print("  Put both in .env and restart.")
-    elif not os.environ.get("APP_SECRET", "").strip():
+        print("  Using the BUILT-IN DEMO ACCOUNT (%s)." % auth.DEMO_USER)
+        print("  Its hash is in auth.py, so anyone who can read the repository")
+        print("  can sign in. Replace it before this is reachable by anyone else:")
+        print("    python auth.py --add-user rep   -> APP_USERS=... in .env")
+        print("")
+    if not os.environ.get("APP_SECRET", "").strip():
         print("  WARNING : APP_SECRET is unset, so sessions die on restart.")
         print("            python auth.py --secret")
-    if AUTH_READY and not INSECURE_COOKIE and args.host in ("127.0.0.1", "localhost"):
-        print("  NOTE    : cookies are Secure-only. For plain-HTTP localhost testing,")
-        print("            set APP_INSECURE_COOKIE=1 in .env.")
+    global INSECURE_COOKIE
+    if not _INSECURE_SET_EXPLICITLY and args.host in ("127.0.0.1", "::1", "localhost"):
+        # Loopback is not network-reachable, so dropping Secure here costs
+        # nothing and is the difference between the login working and not.
+        INSECURE_COOKIE = True
+        print("  Cookies : Secure relaxed for loopback (plain HTTP works)")
+    else:
+        print("  Cookies : Secure%s" % ("" if not INSECURE_COOKIE else " DISABLED by APP_INSECURE_COOKIE"))
     print("  Ctrl+C to stop")
     print("")
 

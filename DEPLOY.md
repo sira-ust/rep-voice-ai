@@ -16,10 +16,12 @@ silently unavailable and the agent hears nothing. **A TLS reverse proxy is not
 optional.**
 
 **2. `/api/conversation-token` spends money.** Every call starts a billable
-ElevenLabs conversation. `server.py` now requires a signed-in session for the
-page and every `/api/*` route, and caps conversations per user per hour — but it
-refuses to serve anything at all until you configure a user, so do that before
-you expect the service to come up.
+ElevenLabs conversation. `server.py` requires a signed-in session for the page
+and every `/api/*` route, and caps conversations per user per hour.
+
+**But it ships with a demo account** (`testuser`) whose hash is in `auth.py`, so
+on a reachable host that is equivalent to no authentication. Setting `APP_USERS`
+is a deployment step, not an optional hardening one.
 
 ## Requirements
 
@@ -78,9 +80,13 @@ sudo chown -R voiceai:voiceai /opt/rep-voice-ai
 
 ### Credentials for signing in
 
-The server will not serve the UI with no users configured — it returns 503 with
-setup instructions rather than falling back to open access. Generate both values
-on the server (the hash is salted, so generate it wherever you like):
+**Do this before you expose the service.** With `APP_USERS` empty the app falls
+back to the demo account built into `auth.py` (`testuser`), whose hash is in the
+repository and whose password is trivially recoverable from it. On a reachable
+host that is the same as no authentication at all.
+
+Generate real credentials (the hash is salted, so generate it wherever you
+like):
 
 ```sh
 cd /opt/rep-voice-ai
@@ -154,8 +160,8 @@ journalctl -u rep-voice-ai -n 20
 ```
 
 `hasApiKey: false` means the `.env` was not read — check the path and that the
-`voiceai` user can read it. A 503 with "Authentication is not configured" means
-`APP_USERS` is empty.
+`voiceai` user can read it. If the banner says **BUILT-IN DEMO ACCOUNT**, your
+`APP_USERS` line is missing and anyone who can read the repo can sign in.
 
 Unauthenticated requests should be refused before you go any further:
 
@@ -297,8 +303,8 @@ before.
 | Agent connects, speaks its opener, then dies | The LLM leg — see the "custom_llm generation failed" section in [README.md](README.md) |
 | Connects but never hears you | `mic-out` at 0 in the event log means audio is not being captured or sent |
 | Tool calls time out | Cold Databricks warehouse; raise `DATABRICKS_TOOL_TIMEOUT` and re-sync |
-| 503 "Authentication is not configured" | `APP_USERS` is empty — run `auth.py --add-user` |
-| Sign-in succeeds then bounces back to /login | Cookies are `Secure`; you are on plain HTTP. Fix TLS, or set `APP_INSECURE_COOKIE=1` for local testing only |
+| Banner says BUILT-IN DEMO ACCOUNT | `APP_USERS` is empty — run `auth.py --add-user` |
+| Sign-in succeeds then bounces back to /login | Cookies are `Secure` and you are on plain HTTP. Fix TLS; `APP_INSECURE_COOKIE=1` is a local-only escape hatch |
 | Everyone signed out after a restart | `APP_SECRET` unset, so a new one is generated each boot |
 | 429 on starting a conversation | Per-user hourly cap; raise `APP_TOKENS_PER_HOUR` |
 
