@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ElevenLabs Agent</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#127908;</text></svg>" />
+</head>
+<body>
+  <div class="app">
+
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M4 10v4M8 6v12M12 3v18M16 6v12M20 10v4"/>
+          </svg>
+        </span>
+        <span class="brand-name" id="brandName">ElevenLabs Agent</span>
+      </div>
+
+      <div class="topbar-right">
+        <span class="status-pill" id="statusPill">
+          <span class="dot" id="statusDot"></span>
+          <span id="statusText">Disconnected</span>
+        </span>
+        <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="banner" id="errorBanner" hidden role="alert">
+      <svg class="banner-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/>
+      </svg>
+      <span id="errorText"></span>
+      <button class="banner-close" id="errorClose" aria-label="Dismiss">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <path d="M6 6l12 12M18 6L6 18"/>
+        </svg>
+      </button>
+    </div>
+
+    <section class="settings" id="settingsPanel" hidden>
+      <div class="settings-grid">
+        <div class="field">
+          <label for="agentSelect">Agent</label>
+          <select id="agentSelect"></select>
+        </div>
+        <div class="field">
+          <label for="connSelect">Transport</label>
+          <select id="connSelect">
+            <option value="websocket">WebSocket</option>
+            <option value="webrtc">WebRTC</option>
+          </select>
+        </div>
+        <div class="field field-wide">
+          <label for="agentIdInput">Agent ID</label>
+          <input id="agentIdInput" type="text" spellcheck="false" placeholder="agent_…" />
+        </div>
+      </div>
+      <div class="notes">
+        <p class="note" id="llmNote"></p>
+        <p class="note" id="keyNote"></p>
+      </div>
+    </section>
+
+    <main class="stage">
+      <div class="orb" id="orb">
+        <span class="orb-halo"></span>
+        <span class="orb-ring ring1"></span>
+        <span class="orb-ring ring2"></span>
+        <span class="orb-level"></span>
+        <span class="orb-core"></span>
+      </div>
+
+      <p class="mode-label" id="modeLabel">Tap to start talking</p>
+
+      <button class="btn btn-primary" id="callBtn">
+        <svg class="mic-icon" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <rect x="9" y="2" width="6" height="11" rx="3"/>
+          <path d="M5 10a7 7 0 0 0 14 0M12 17v5"/>
+        </svg>
+        <span id="callBtnLabel">Start conversation</span>
+      </button>
+
+      <div class="controls">
+        <button class="icon-btn" id="muteBtn" title="Mute microphone" aria-label="Mute microphone" disabled>
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+            <rect x="9" y="2" width="6" height="11" rx="3"/>
+            <path d="M5 10a7 7 0 0 0 14 0M12 17v5"/>
+          </svg>
+        </button>
+
+        <div class="gauge" title="Microphone input level">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+            <rect x="9" y="2" width="6" height="11" rx="3"/>
+            <path d="M5 10a7 7 0 0 0 14 0M12 17v5"/>
+          </svg>
+          <div class="meter"><div class="meter-fill" id="meterFill"></div></div>
+        </div>
+
+        <div class="gauge" title="Output volume">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+            <path d="M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7"/>
+          </svg>
+          <input type="range" id="volumeSlider" min="0" max="100" value="80" aria-label="Output volume" />
+        </div>
+      </div>
+    </main>
+
+    <section class="transcript-section">
+      <div class="transcript" id="transcript">
+        <p class="empty-state">
+          <span class="empty-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+          </span>
+          The transcript will appear here once the conversation starts.
+        </p>
+      </div>
+      <form class="composer" id="composer">
+        <input id="composerInput" type="text" placeholder="Type a message to the agent…" autocomplete="off" disabled />
+        <button class="btn btn-ghost" type="submit" id="composerSend" disabled>Send</button>
+      </form>
+    </section>
+
+    <section class="debug">
+      <div class="debug-head">
+        <button class="debug-toggle" id="debugToggle" aria-expanded="false">
+          <span class="debug-caret" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round">
+              <path d="M9 6l6 6-6 6"/>
+            </svg>
+          </span>
+          Event log
+          <span class="debug-count" id="debugCount">0</span>
+        </button>
+        <div class="debug-actions">
+          <span class="debug-stat" id="debugStat"></span>
+          <button class="btn-mini" id="debugCopy">Copy</button>
+          <button class="btn-mini" id="debugClear">Clear</button>
+        </div>
+      </div>
+      <pre class="debug-log" id="debugLog" hidden></pre>
+    </section>
+
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,98 @@
+{
+  "_comment": [
+    "One entry per lookup the agent can perform. Each becomes a separate",
+    "ElevenLabs webhook tool with its SQL pinned as a constant -- the model",
+    "supplies only the lookup value, bound as a query parameter.",
+    "",
+    "match: 'exact' (default) keys off an id column; 'contains' does a",
+    "case-insensitive LIKE search, for when the caller knows a name but not a key.",
+    "latest_week_column pins a weekly-snapshot table to its newest period so a",
+    "search returns each product once instead of once per week.",
+    "",
+    "Keep `description` sharply distinct between tools, including what each is",
+    "NOT for. gemma4-26b picks the tool from these words alone, and a small",
+    "model confuses overlapping descriptions.",
+    "",
+    "Keep `columns` and `limit` small. Every value becomes words spoken aloud.",
+    "",
+    "Run `python databricks_tool.py --sync` after editing this file."
+  ],
+  "tools": [
+    {
+      "name": "lookup_customer_week",
+      "table": "ust_databricks.ust_reporting.mart_customer_weekly",
+      "lookup_column": "customer_key",
+      "columns": [
+        "customer_key",
+        "week_start",
+        "orders_submitted",
+        "order_value_total",
+        "churn_signal",
+        "service_mode"
+      ],
+      "order_by": "week_start DESC",
+      "limit": 1,
+      "value_label": "customer key",
+      "example": "RED005",
+      "description": "Look up ONE CUSTOMER's most recent weekly activity by their customer key, for example RED005. Use this for questions about how a customer is doing, how many orders they placed, their order value, or whether they are at risk of churning. Do not use this for products, parts or stock."
+    },
+    {
+      "name": "lookup_item_supply",
+      "table": "ust_databricks.ust_reporting.mart_item_demand_supply",
+      "lookup_column": "prtnum",
+      "columns": [
+        "prtnum",
+        "item_name",
+        "week_start",
+        "shippable_eow",
+        "avg_on_hand_qty",
+        "days_out_of_stock",
+        "signal"
+      ],
+      "order_by": "week_start DESC",
+      "limit": 1,
+      "value_label": "part number",
+      "example": "11050",
+      "description": "Look up ONE PRODUCT's most recent weekly stock and demand by its part number. Use this for questions about availability, how much of an item is in stock or shippable, or whether an item has been out of stock recently. Do not use this for customers or sales reps."
+    },
+    {
+      "name": "search_items_by_name",
+      "table": "ust_databricks.ust_reporting.mart_item_demand_supply",
+      "lookup_column": "item_name",
+      "match": "all_words",
+      "latest_week_column": "week_start",
+      "columns": [
+        "prtnum",
+        "item_name",
+        "shippable_eow"
+      ],
+      "order_by": "shippable_eow DESC",
+      "limit": 6,
+      "value_label": "product name or keyword",
+      "example": "oyster sauce",
+      "description": "Search the product catalogue by product name when the caller does not know the part number. Pass only the two or three words that identify the product, in their normal English spelling and singular form -- for example send 'pad thai noodle' for \"do you have any PadThai noodles?\", or 'oyster sauce' for \"what oyster sauces do we carry?\". Drop filler words such as 'any', 'some', 'do we have'; every word you send must appear in the product name. If the search returns nothing, try again with fewer or more general words (send 'noodle' instead of 'pad thai noodle') before telling the caller you found nothing. Returns up to six products with part numbers and how many units are shippable. Use this to answer whether we carry something, or which brands we stock. If the caller already gave a part number, use lookup_item_supply instead."
+    },
+    {
+      "name": "rank_customers",
+      "kind": "rank",
+      "table": "ust_databricks.ust_reporting.mart_customer_weekly",
+      "latest_week_column": "week_start",
+      "columns": [
+        "customer_key",
+        "orders_submitted",
+        "order_value_total",
+        "churn_signal"
+      ],
+      "modes": {
+        "top_by_order_value": "-order_value_total",
+        "lowest_by_order_value": "order_value_total",
+        "top_by_orders": "-CAST(orders_submitted AS DOUBLE)",
+        "lowest_by_orders": "CAST(orders_submitted AS DOUBLE)"
+      },
+      "limit": 5,
+      "value_label": "ranking mode",
+      "example": "top_by_order_value",
+      "description": "Rank customers for the most recent week. Use this when the caller asks about customers as a group rather than one named account -- best, worst, busiest, quietest, highest or lowest spending. Decide which ranking they mean and pass exactly one of: top_by_order_value, lowest_by_order_value, top_by_orders, lowest_by_orders. Returns five customers. If the caller named a specific customer key, use lookup_customer_week instead."
+    }
+  ]
+}
