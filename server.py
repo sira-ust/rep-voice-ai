@@ -169,11 +169,6 @@ def load_tools_file() -> dict:
     return raw if isinstance(raw, dict) else {}
 
 
-def load_tool_specs() -> list:
-    specs = load_tools_file().get("tools")
-    return specs if isinstance(specs, list) else []
-
-
 class UpstreamError(Exception):
     def __init__(self, status: int, message: str):
         super().__init__(message)

@@ -4,8 +4,8 @@ Settings shared by every script here.
 
 Standard library only. Importing this loads .env once, so a script needs only:
 
-    import common            # .env is now in os.environ
-    KEY = common.env("ELEVENLABS_API_KEY")
+    import common                                  # .env is now in os.environ
+    KEY = os.environ.get("ELEVENLABS_API_KEY", "")
 
 Real environment variables win over .env, so a systemd unit, a container or CI
 can override a value without editing the file. That precedence is deliberate,
@@ -49,24 +49,6 @@ def load(path: Path | None = None) -> None:
     """Populate os.environ from .env without overriding what is already set."""
     for key, value in _parse(path or ENV_FILE).items():
         os.environ.setdefault(key, value)
-
-
-def env(name: str, default: str = "") -> str:
-    return os.environ.get(name, default).strip()
-
-
-def env_int(name: str, default: int) -> int:
-    try:
-        return int(env(name) or default)
-    except ValueError:
-        return default
-
-
-def env_flag(name: str, default: bool = False) -> bool:
-    raw = env(name).lower()
-    if not raw:
-        return default
-    return raw in ("1", "true", "on", "yes")
 
 
 def mask(value: str) -> str:

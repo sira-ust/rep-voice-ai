@@ -16,7 +16,6 @@ passed to the tool, and how many rows came back.
 from __future__ import annotations
 
 import json
-import os
 import socket
 import sys
 import time
