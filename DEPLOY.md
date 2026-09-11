@@ -19,9 +19,10 @@ optional.**
 ElevenLabs conversation. `server.py` requires a signed-in session for the page
 and every `/api/*` route, and caps conversations per user per hour.
 
-**But it ships with a demo account** (`testuser`) whose hash is in `auth.py`, so
-on a reachable host that is equivalent to no authentication. Setting `APP_USERS`
-is a deployment step, not an optional hardening one.
+**It ships with no accounts.** Until you set `APP_USERS`, every sign-in fails
+and the app is unusable — deliberately, since a built-in account would carry its
+hash in the repository. Creating accounts is a deployment step, not optional
+hardening.
 
 ## Requirements
 
@@ -104,12 +105,10 @@ sudo chown -R voiceai:voiceai /opt/rep-voice-ai
 
 ### Credentials for signing in
 
-**Do this before you expose the service.** With `APP_USERS` empty the app falls
-back to the demo account built into `auth.py` (`testuser`), whose hash is in the
-repository and whose password is trivially recoverable from it. On a reachable
-host that is the same as no authentication at all.
+**Do this before you start the service** — with `APP_USERS` empty there are no
+accounts at all and nobody can sign in. The startup banner says so.
 
-Generate real credentials (the hash is salted, so generate it wherever you
+Generate credentials (the hash is salted, so generate it wherever you
 like):
 
 ```sh

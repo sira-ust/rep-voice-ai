@@ -28,32 +28,22 @@ short-lived conversation token minted per call.
 
 ## Sign-in is required
 
-The page and every `/api/*` route need a session. A built-in account works out
-of the box, so `python server.py` is all you need to get going:
-
-| | |
-| --- | --- |
-| User | `testuser` |
-| Password | `ustuser!` |
-
-> **This is a demo credential, not a secret.** Its hash sits in
-> [auth.py](auth.py) in this repository, and the password is short enough that
-> recovering it from the hash is trivial. The real posture is *anyone who can
-> read this repo can sign in.* Replace it before the app is reachable by anyone
-> you would not hand the password to:
->
-> ```sh
-> python auth.py --add-user rep    # -> APP_USERS=... in .env
-> ```
->
-> Setting `APP_USERS` replaces the built-in account entirely. The startup
-> banner says loudly which one is active.
-
-Also worth setting, though neither is required:
+The page and every `/api/*` route need a session, and there are no accounts
+until you create one. That is on purpose: an account shipped in the repository
+would put its own password hash in everyone's hands.
 
 ```sh
-python auth.py --secret          # -> APP_SECRET=...  or sessions die on restart
+python auth.py --secret          # -> APP_SECRET=...   signs session cookies
+python auth.py --add-user rep    # prompts, -> APP_USERS=...
 ```
+
+Put both lines in `.env`. `--add-user` prints the whole `APP_USERS` line
+including any accounts already there, so adding a second person is the same
+command again. Only the salted hash is stored — a forgotten password is reset by
+generating a new entry, not recovered.
+
+Without `APP_SECRET` the app still runs, but sessions die on every restart. The
+startup banner warns about both.
 
 > **If an edit to `.env` seems to have no effect,** a real environment variable
 > is shadowing it — that precedence is deliberate, so a systemd unit or CI can

@@ -506,11 +506,9 @@ def main() -> int:
     print("  Warm-up : " + ("warehouse %s, at most every %d min"
                             % (DBX_WAREHOUSE, WARM_EVERY // 60) if WARM_READY
                             else "off (set DATABRICKS_WARM_TOKEN to enable)"))
-    if auth.using_demo_account():
+    if not auth.users():
         print("")
-        print("  Using the BUILT-IN DEMO ACCOUNT (%s)." % auth.DEMO_USER)
-        print("  Its hash is in auth.py, so anyone who can read the repository")
-        print("  can sign in. Replace it before this is reachable by anyone else:")
+        print("  NO ACCOUNTS CONFIGURED, so every login will fail. Add one:")
         print("    python auth.py --add-user rep   -> APP_USERS=... in .env")
         print("")
     if not os.environ.get("APP_SECRET", "").strip():
