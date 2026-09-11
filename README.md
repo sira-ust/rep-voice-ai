@@ -260,8 +260,6 @@ and re-reads afterwards to confirm the change stuck.
 | --- | --- | --- |
 | [chat_test.py](chat_test.py) | One or many turns end to end, with the tool calls each made | After any change — the everyday check |
 | [test_phrasings.py](test_phrasings.py) | A batch of phrasings and which tool each reached | After editing a tool description or adding a tool |
-| [analyze_call.py](analyze_call.py) | Per-turn latency breakdown for a past call | When the agent feels slow |
-| [check_usage.py](check_usage.py) | ElevenLabs characters used and remaining | Occasionally |
 | [convai.py](convai.py) | Library, not a CLI — the shared conversation driver | — |
 
 ```sh

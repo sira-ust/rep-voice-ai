@@ -15,9 +15,9 @@ to apply -- this script writes it through the API so there is no draft to forget
 Zero Retention Mode and voice recording are mutually exclusive -- the API rejects
 the pair. Enabling ZRM here also sets record_voice to False.
 
-What you lose while it is on: stored transcripts and the per-turn latency metrics
-that analyze_call.py reads. Use post-call webhooks, or the browser event log in
-the local web UI, to keep any record of a call.
+What you lose while it is on: stored transcripts and the per-turn latency
+metrics the ElevenLabs dashboard shows. Use post-call webhooks, or the browser
+event log in the local web UI, to keep any record of a call.
 """
 
 from __future__ import annotations
@@ -196,7 +196,7 @@ def main() -> int:
 
         if want:
             print("\n  ElevenLabs will no longer store transcripts or per-turn metrics.")
-            print("  analyze_call.py will report what is missing rather than show blanks.")
+            print("  Conversation history in the ElevenLabs dashboard will be empty too.")
             print("  Use the browser Event log, or a post-call webhook, to keep records.")
         print("")
     except Fail as exc:
