@@ -29,6 +29,9 @@ const el = {
   volumeSlider: $("volumeSlider"),
   meterFill: $("meterFill"),
   transcript: $("transcript"),
+  guide: $("guide"),
+  guideGroups: $("guideGroups"),
+  guideFoot: $("guideFoot"),
   composer: $("composer"),
   composerInput: $("composerInput"),
   composerSend: $("composerSend"),
@@ -161,8 +164,7 @@ function addMessage(text, kind) {
     return last;
   }
 
-  const empty = el.transcript.querySelector(".empty-state");
-  if (empty) empty.remove();
+  if (el.guide && el.guide.isConnected) el.guide.remove();
 
   const node = document.createElement("div");
   node.className = `msg msg-${kind}`;
@@ -575,6 +577,66 @@ window.addEventListener("beforeunload", () => {
   if (state.conversation) state.conversation.endSession();
 });
 
+/** Render the "what can I ask" guide from the tools actually wired up. */
+async function loadGuide() {
+  let data;
+  try {
+    data = await getJSON("/api/capabilities");
+  } catch {
+    return; // the guide is a convenience; never block the app on it
+  }
+  const groups = data.groups || [];
+  if (!groups.length || !el.guideGroups) return;
+
+  el.guideGroups.innerHTML = "";
+  const tables = [];
+
+  for (const group of groups) {
+    const node = document.createElement("div");
+    node.className = "guide-group";
+
+    const head = document.createElement("div");
+    head.className = "guide-head";
+    const subject = document.createElement("span");
+    subject.className = "guide-subject";
+    subject.textContent = group.subject;
+    head.appendChild(subject);
+    for (const table of group.tables || []) {
+      const tag = document.createElement("span");
+      tag.className = "guide-table";
+      tag.textContent = table;
+      head.appendChild(tag);
+      if (!tables.includes(table)) tables.push(table);
+    }
+    node.appendChild(head);
+
+    const asks = document.createElement("div");
+    asks.className = "guide-asks";
+    for (const question of group.questions || []) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "guide-ask";
+      btn.textContent = question;
+      // Clicking loads it into the composer rather than sending, so the user
+      // can edit it and can see where their words go.
+      btn.addEventListener("click", () => {
+        el.composerInput.value = question;
+        if (!el.composerInput.disabled) el.composerInput.focus();
+        else el.modeLabel.textContent = "Start the conversation, then send it";
+      });
+      asks.appendChild(btn);
+    }
+    node.appendChild(asks);
+    el.guideGroups.appendChild(node);
+  }
+
+  if (el.guideFoot) {
+    el.guideFoot.textContent =
+      `Reading ${tables.length} table${tables.length === 1 ? "" : "s"} live. ` +
+      "Figures come from a lookup each time, never from memory.";
+  }
+}
+
 /** Show which LLM the selected agent is wired to. */
 async function refreshAgentInfo() {
   const agentId = currentAgentId();
@@ -654,6 +716,7 @@ async function init() {
   state.ready = Boolean(state.config.hasApiKey && el.agentIdInput.value);
   render();
   refreshAgentInfo();
+  loadGuide();
 }
 
 init();

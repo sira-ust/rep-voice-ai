@@ -116,14 +116,14 @@
 
     <section class="transcript-section">
       <div class="transcript" id="transcript">
-        <p class="empty-state">
-          <span class="empty-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
-          </span>
-          The transcript will appear here once the conversation starts.
-        </p>
+        <div class="guide" id="guide">
+          <p class="guide-lede">
+            Ask about customer accounts and product stock. Speak naturally — you
+            can follow up without repeating yourself.
+          </p>
+          <div class="guide-groups" id="guideGroups"></div>
+          <p class="guide-foot" id="guideFoot"></p>
+        </div>
       </div>
       <form class="composer" id="composer">
         <input id="composerInput" type="text" placeholder="Type a message to the agent…" autocomplete="off" disabled />

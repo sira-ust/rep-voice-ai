@@ -181,6 +181,22 @@ CSP_POLICY = (
 )
 
 
+TOOLS_FILE = ROOT / "databricks_tools.json"
+
+
+def load_tool_specs() -> list:
+    """Tool definitions, for the in-app guide. Missing or broken file is not
+    fatal -- the agent still works, the UI just shows no examples."""
+    if not TOOLS_FILE.is_file():
+        return []
+    try:
+        raw = json.loads(TOOLS_FILE.read_text(encoding="utf-8-sig"))
+    except ValueError:
+        return []
+    specs = raw.get("tools") if isinstance(raw, dict) else raw
+    return specs if isinstance(specs, list) else []
+
+
 class UpstreamError(Exception):
     def __init__(self, status: int, message: str):
         super().__init__(message)
@@ -394,6 +410,25 @@ class Handler(BaseHTTPRequestHandler):
                 "hasApiKey": bool(API_KEY),
                 "user": self._user(),
             })
+            return
+
+        if route == "/api/capabilities":
+            # Built from databricks_tools.json -- the same file that defines the
+            # tools -- so the guide cannot drift from what the agent can
+            # actually do. Only table names and sample questions are exposed;
+            # no SQL, no credentials.
+            groups = {}
+            for spec in load_tool_specs():
+                subject = spec.get("subject") or "Data"
+                entry = groups.setdefault(subject, {"subject": subject,
+                                                    "tables": [], "questions": []})
+                table = (spec.get("table") or "").split(".")[-1]
+                if table and table not in entry["tables"]:
+                    entry["tables"].append(table)
+                for question in (spec.get("sample_questions") or []):
+                    if question not in entry["questions"]:
+                        entry["questions"].append(question)
+            self._json(200, {"groups": [g for g in groups.values() if g["questions"]]})
             return
 
         if route == "/api/agents":
