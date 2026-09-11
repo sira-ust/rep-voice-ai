@@ -604,11 +604,28 @@ async function loadGuide() {
     for (const table of group.tables || []) {
       const tag = document.createElement("span");
       tag.className = "guide-table";
-      tag.textContent = table;
+      tag.textContent = table.name;
+      if (table.grain) tag.title = table.grain;
       head.appendChild(tag);
-      if (!tables.includes(table)) tables.push(table);
+      if (!tables.includes(table.name)) tables.push(table.name);
     }
     node.appendChild(head);
+
+    for (const table of group.tables || []) {
+      if (!table.about) continue;
+      const about = document.createElement("p");
+      about.className = "guide-about";
+      about.textContent = table.about;
+      node.appendChild(about);
+      // Saying what the data cannot answer prevents the most frustrating
+      // failure: a reasonable question that can never work.
+      if (table.notCovered) {
+        const limit = document.createElement("p");
+        limit.className = "guide-limit";
+        limit.textContent = "Not in this data: " + table.notCovered;
+        node.appendChild(limit);
+      }
+    }
 
     const asks = document.createElement("div");
     asks.className = "guide-asks";

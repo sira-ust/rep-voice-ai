@@ -15,9 +15,24 @@
     "",
     "Keep `columns` and `limit` small. Every value becomes words spoken aloud.",
     "`subject` and `sample_questions` are shown to the person using the web UI, so they know what this agent can answer. They are not sent to the model.",
+    "`tables` describes each table for the person using the web UI: what it holds, its grain, and what it cannot answer. Shown in the guide, never sent to the model.",
     "",
     "Run `python databricks_tool.py --sync` after editing this file."
   ],
+  "tables": {
+    "ust_databricks.ust_reporting.mart_customer_weekly": {
+      "label": "Customer activity",
+      "about": "One row per customer per week, for about 2,000 accounts. Records how many orders they submitted and what those orders were worth, whether they ordered themselves or through a rep, how much friction they hit in the app, and whether they are showing a churn signal.",
+      "grain": "weekly \u2014 answers always use the most recent week",
+      "not_covered": "Which products an account ordered. Customer activity and product data are separate here, with no link between them."
+    },
+    "ust_databricks.ust_reporting.mart_item_demand_supply": {
+      "label": "Product stock and demand",
+      "about": "One row per product per week, across about 5,800 products in 69 families. Records how much stock is on hand and shippable, how many days it was out of stock, and the interest it drew \u2014 views, cart adds, and whether demand is trending.",
+      "grain": "weekly \u2014 answers always use the most recent week",
+      "not_covered": "Prices, and who bought what. Product names are abbreviated, so search by a couple of plain words rather than an exact name."
+    }
+  },
   "tools": [
     {
       "name": "lookup_customer_week",

@@ -184,16 +184,22 @@ CSP_POLICY = (
 TOOLS_FILE = ROOT / "databricks_tools.json"
 
 
-def load_tool_specs() -> list:
-    """Tool definitions, for the in-app guide. Missing or broken file is not
-    fatal -- the agent still works, the UI just shows no examples."""
+def load_tools_file() -> dict:
+    """databricks_tools.json, for the in-app guide. A missing or broken file is
+    not fatal -- the agent still works, the UI just shows no guide."""
     if not TOOLS_FILE.is_file():
-        return []
+        return {}
     try:
         raw = json.loads(TOOLS_FILE.read_text(encoding="utf-8-sig"))
     except ValueError:
-        return []
-    specs = raw.get("tools") if isinstance(raw, dict) else raw
+        return {}
+    if isinstance(raw, list):
+        return {"tools": raw, "tables": {}}
+    return raw if isinstance(raw, dict) else {}
+
+
+def load_tool_specs() -> list:
+    specs = load_tools_file().get("tools")
     return specs if isinstance(specs, list) else []
 
 
@@ -417,14 +423,24 @@ class Handler(BaseHTTPRequestHandler):
             # tools -- so the guide cannot drift from what the agent can
             # actually do. Only table names and sample questions are exposed;
             # no SQL, no credentials.
+            config = load_tools_file()
+            descriptions = config.get("tables") or {}
             groups = {}
-            for spec in load_tool_specs():
+            for spec in (config.get("tools") or []):
                 subject = spec.get("subject") or "Data"
                 entry = groups.setdefault(subject, {"subject": subject,
                                                     "tables": [], "questions": []})
-                table = (spec.get("table") or "").split(".")[-1]
-                if table and table not in entry["tables"]:
-                    entry["tables"].append(table)
+                full = spec.get("table") or ""
+                if full and not any(t["name"] == full.split(".")[-1]
+                                    for t in entry["tables"]):
+                    meta = descriptions.get(full) or {}
+                    entry["tables"].append({
+                        "name": full.split(".")[-1],
+                        "label": meta.get("label") or "",
+                        "about": meta.get("about") or "",
+                        "grain": meta.get("grain") or "",
+                        "notCovered": meta.get("not_covered") or "",
+                    })
                 for question in (spec.get("sample_questions") or []):
                     if question not in entry["questions"]:
                         entry["questions"].append(question)
