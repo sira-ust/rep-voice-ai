@@ -256,12 +256,28 @@ and re-reads afterwards to confirm the change stuck.
 
 **Testing** — all of these work without a microphone.
 
-| Script | What it checks |
-| --- | --- |
-| [chat_test.py](chat_test.py) | One text turn end to end; exits non-zero if the LLM fails |
-| [test_conversation.py](test_conversation.py) | A scripted multi-turn conversation, plus the tool calls it made |
-| [test_phrasings.py](test_phrasings.py) | A batch of phrasings: which tool each routed to, and whether rows came back |
-| [analyze_call.py](analyze_call.py) | Per-turn latency breakdown for a past call |
+| Script | What it checks | When to run it |
+| --- | --- | --- |
+| [chat_test.py](chat_test.py) | One or many turns end to end, with the tool calls each made | After any change — the everyday check |
+| [test_phrasings.py](test_phrasings.py) | A batch of phrasings and which tool each reached | After editing a tool description or adding a tool |
+| [analyze_call.py](analyze_call.py) | Per-turn latency breakdown for a past call | When the agent feels slow |
+| [check_usage.py](check_usage.py) | ElevenLabs characters used and remaining | Occasionally |
+| [convai.py](convai.py) | Library, not a CLI — the shared conversation driver | — |
+
+```sh
+python chat_test.py "How is RED005 doing?"                      # one question
+python chat_test.py "Do you have coconut milk?" "What about the cream?"   # a conversation
+```
+
+Give `chat_test.py` several messages to test a **conversation** rather than a
+question. Context failures only appear across turns — "what about the cream?"
+behaves correctly alone and wrongly as a follow-up — so a single-turn test
+cannot catch them. It prints the search term the model actually sent, which is
+usually the thing you need: a wrong answer is far more often a bad search term
+than a bad lookup.
+
+None of these run on the web host. They talk to ElevenLabs directly, so run
+them from a workstation.
 | [auth.py](auth.py) | Password hashing, sessions, rate limits — plus the CLI above |
 | [common.py](common.py) | Shared `.env` loading. `python common.py --check` shows which values are actually in force |
 
