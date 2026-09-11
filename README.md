@@ -55,6 +55,11 @@ Also worth setting, though neither is required:
 python auth.py --secret          # -> APP_SECRET=...  or sessions die on restart
 ```
 
+> **If an edit to `.env` seems to have no effect,** a real environment variable
+> is shadowing it — that precedence is deliberate, so a systemd unit or CI can
+> override without editing the file. `python common.py --check` prints which
+> source is winning for every key.
+
 Cookies are `Secure`, which means a browser withholds them over plain HTTP.
 The server relaxes that automatically when bound to loopback — so
 `http://127.0.0.1:8080` just works — and keeps it on everywhere else.
@@ -258,6 +263,7 @@ and re-reads afterwards to confirm the change stuck.
 | [test_phrasings.py](test_phrasings.py) | A batch of phrasings: which tool each routed to, and whether rows came back |
 | [analyze_call.py](analyze_call.py) | Per-turn latency breakdown for a past call |
 | [auth.py](auth.py) | Password hashing, sessions, rate limits — plus the CLI above |
+| [common.py](common.py) | Shared `.env` loading. `python common.py --check` shows which values are actually in force |
 
 **Docs**
 

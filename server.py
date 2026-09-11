@@ -30,6 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import auth
+import common  # loads .env on import
 
 ROOT = Path(__file__).resolve().parent
 PUBLIC = ROOT / "public"
@@ -40,22 +41,6 @@ mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
 
 
-def load_dotenv(path: Path) -> None:
-    """Populate os.environ from a .env file. Real environment variables win."""
-    if not path.is_file():
-        return
-    for raw in path.read_text(encoding="utf-8-sig").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
-
-
-load_dotenv(ROOT / ".env")
 
 API_KEY = os.environ.get("ELEVENLABS_API_KEY", "").strip()
 AGENT_ID = os.environ.get("ELEVENLABS_AGENT_ID", "").strip()
@@ -149,20 +134,6 @@ TRUST_PROXY = os.environ.get("APP_TRUST_PROXY", "").strip().lower() in ("1", "tr
 _INSECURE_ENV = os.environ.get("APP_INSECURE_COOKIE", "").strip().lower()
 INSECURE_COOKIE = _INSECURE_ENV in ("1", "true", "on")
 _INSECURE_SET_EXPLICITLY = _INSECURE_ENV != ""
-
-# No users configured means no way to sign in. Refuse to serve anything rather
-# than falling back to open access.
-AUTH_READY = bool(auth.users())
-
-LOCKED_PAGE = (
-    b"<!doctype html><meta charset=utf-8><title>Not configured</title>"
-    b"<body style=\"font:15px system-ui;max-width:34em;margin:12vh auto;padding:0 1em\">"
-    b"<h1 style=\"font-size:18px\">Authentication is not configured</h1>"
-    b"<p>This server will not serve the agent UI until at least one user exists, "
-    b"because the endpoints it exposes can spend ElevenLabs credits.</p>"
-    b"<pre style=\"background:#f2f3f5;padding:.8em;border-radius:6px\">"
-    b"python auth.py --secret\npython auth.py --add-user rep</pre>"
-    b"<p>Put both lines in <code>.env</code> and restart.</p>")
 
 # The browser loads the SDK from jsDelivr and talks to ElevenLabs directly, so
 # both have to be allowed. blob: is required: the SDK builds its AudioWorklet
@@ -336,9 +307,6 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         # Everything past here needs a session.
-        if not AUTH_READY:
-            self._send(503, LOCKED_PAGE, "text/html; charset=utf-8")
-            return
         if not self._user():
             if route.startswith("/api"):
                 self._json(401, {"error": "Not signed in.", "login": "/login"})
@@ -364,9 +332,6 @@ class Handler(BaseHTTPRequestHandler):
         route = urllib.parse.urlparse(self.path).path.rstrip("/") or "/"
         if route != "/login":
             self._send(404, b"Not found", "text/plain; charset=utf-8")
-            return
-        if not AUTH_READY:
-            self._send(503, LOCKED_PAGE, "text/html; charset=utf-8")
             return
 
         allowed, _ = LOGIN_LIMITER.check("login:" + self._client())

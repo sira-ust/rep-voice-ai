@@ -35,6 +35,8 @@ import time
 from collections import defaultdict, deque
 from pathlib import Path
 
+import common  # loads .env on import
+
 ROOT = Path(__file__).resolve().parent
 
 # scrypt parameters. n=2**14 with r=8 needs 16 MiB and ~50ms per verification:
@@ -48,20 +50,6 @@ SCRYPT_P = 1
 SCRYPT_MAXMEM = 64 * 1024 * 1024
 
 SESSION_COOKIE = "voiceai_session"
-
-
-def load_dotenv(path: Path) -> None:
-    if not path.is_file():
-        return
-    for raw in path.read_text(encoding="utf-8-sig").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
 
 
 # ------------------------------------------------------------------ passwords
@@ -270,7 +258,6 @@ def login_page(error: str = "") -> bytes:
 # ------------------------------------------------------------------ cli
 
 def main() -> int:
-    load_dotenv(ROOT / ".env")
     args = sys.argv[1:]
 
     if not args or args[0] in ("-h", "--help"):

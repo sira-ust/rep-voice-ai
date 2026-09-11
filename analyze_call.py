@@ -23,22 +23,11 @@ import os
 import sys
 import urllib.request
 
+import common  # loads .env on import
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
 
-def load_env():
-    path = os.path.join(ROOT, ".env")
-    if not os.path.isfile(path):
-        return
-    with open(path, encoding="utf-8-sig") as fh:
-        for line in fh:
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, _, v = line.partition("=")
-                os.environ.setdefault(k.strip(), v.strip())
-
-
-load_env()
 KEY = os.environ.get("ELEVENLABS_API_KEY", "").strip()
 AGENT = os.environ.get("ELEVENLABS_AGENT_ID", "").strip()
 

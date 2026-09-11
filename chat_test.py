@@ -27,24 +27,11 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+import common  # loads .env on import
+
 ROOT = Path(__file__).resolve().parent
 
 
-def load_dotenv(path: Path) -> None:
-    if not path.is_file():
-        return
-    for raw in path.read_text(encoding="utf-8-sig").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip().strip('"').strip("'")
-        if key and key not in os.environ:
-            os.environ[key] = value
-
-
-load_dotenv(ROOT / ".env")
 KEY = os.environ.get("ELEVENLABS_API_KEY", "").strip()
 AGENT = os.environ.get("ELEVENLABS_AGENT_ID", "").strip()
 

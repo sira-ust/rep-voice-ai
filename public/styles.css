@@ -503,27 +503,7 @@ input[type="range"]::-moz-range-thumb {
   gap: 8px;
 }
 
-.empty-state {
-  margin: auto;
-  color: var(--text-3);
-  font-size: 13px;
-  text-align: center;
-  max-width: 30ch;
-  display: grid;
-  justify-items: center;
-  gap: 9px;
-}
 
-.empty-mark {
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  color: var(--text-3);
-}
 
 .msg {
   max-width: 80%;

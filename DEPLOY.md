@@ -183,6 +183,13 @@ per-user conversation cap, and whether CSP is on. Check it:
 journalctl -u rep-voice-ai -n 20
 ```
 
+Confirm the settings the process actually resolved — a stray environment
+variable silently overrides `.env`, and this is where that bites:
+
+```sh
+sudo -u voiceai python3 common.py --check
+```
+
 `hasApiKey: false` means the `.env` was not read — check the path and that the
 `voiceai` user can read it. If the banner says **BUILT-IN DEMO ACCOUNT**, your
 `APP_USERS` line is missing and anyone who can read the repo can sign in.
