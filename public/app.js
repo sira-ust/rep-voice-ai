@@ -39,6 +39,7 @@ const el = {
   debugLog: $("debugLog"),
   debugCount: $("debugCount"),
   debugStat: $("debugStat"),
+  debugDetail: $("debugDetail"),
   debugCopy: $("debugCopy"),
   debugClear: $("debugClear"),
 };
@@ -66,10 +67,28 @@ const state = {
 const LOG_CAP = 600;
 const logLines = [];
 
-function log(channel, label, payload) {
+// Message text and tool payloads -- the rows coming back from Databricks among
+// them -- are logged only when someone asks for them. Off by default because
+// the log has a Copy button and a 600-line buffer, so the quiet default is for
+// customer data not to ride along into a ticket or a screen-share.
+//
+// Event types, counts, timings, connection states and errors are never hidden:
+// that is what actually diagnoses a stall or a dead microphone, and none of it
+// carries content.
+const DETAIL_KEY = "convai.logDetail";
+let logDetail = false;
+try {
+  logDetail = localStorage.getItem(DETAIL_KEY) === "1";
+} catch {
+  // Private windows and locked-down profiles throw on access; default stands.
+}
+
+function log(channel, label, payload, redacted) {
   const elapsed = state.startedAt ? ((Date.now() - state.startedAt) / 1000).toFixed(2) : "0.00";
   let detail = "";
-  if (payload !== undefined) {
+  if (redacted) {
+    detail = "(hidden)";
+  } else if (payload !== undefined) {
     try {
       detail = typeof payload === "string" ? payload : JSON.stringify(payload);
     } catch {
@@ -97,6 +116,11 @@ function log(channel, label, payload) {
 
   el.debugCount.textContent = String(logLines.length);
   console.log("[convai]", plain);
+}
+
+/** log() for conversation content and tool payloads. Gated by the toggle. */
+function logDetailed(channel, label, payload) {
+  log(channel, label, logDetail ? payload : undefined, !logDetail);
 }
 
 function renderDebugStats() {
@@ -377,7 +401,7 @@ async function startConversation() {
       },
 
       onMessage: ({ message, role, source }) => {
-        log("cb", "onMessage", { role: role || source, message });
+        logDetailed("cb", `onMessage ${role || source || "?"}`, message);
         if (!message) return;
         const speaker = role || source;
         if (speaker === "user") {
@@ -426,7 +450,7 @@ async function startConversation() {
           renderDebugStats();
           return;
         }
-        log("out", type || "event", event);
+        logDetailed("out", type || "event", event);
       },
 
       onIncomingEvent: (event) => {
@@ -438,11 +462,11 @@ async function startConversation() {
           if (state.counts.incoming % 25 === 0) log("in", "audio x25");
           return;
         }
-        log("in", type || "event", event);
+        logDetailed("in", type || "event", event);
       },
 
       onAgentChatResponsePart: (part) => {
-        log("in", "responsePart", part);
+        logDetailed("in", "responsePart", part);
         handleResponsePart(part);
       },
 
@@ -451,8 +475,8 @@ async function startConversation() {
       },
 
       onInterruption: (info) => log("in", "interruption", info),
-      onAgentToolRequest: (info) => log("in", "toolRequest", info),
-      onAgentToolResponse: (info) => log("in", "toolResponse", info),
+      onAgentToolRequest: (info) => logDetailed("in", "toolRequest", info),
+      onAgentToolResponse: (info) => logDetailed("in", "toolResponse", info),
       onContextUsage: (info) => log("in", "contextUsage", info),
       onPing: (info) => log("in", "ping", info && info.ping_ms),
     });
@@ -539,7 +563,7 @@ el.composer.addEventListener("submit", (event) => {
   event.preventDefault();
   const text = el.composerInput.value.trim();
   if (!text || !state.conversation) return;
-  log("out", "sendUserMessage", text);
+  logDetailed("out", "sendUserMessage", text);
   state.conversation.sendUserMessage(text);
   addMessage(text, "user");
   el.composerInput.value = "";
@@ -550,6 +574,31 @@ el.debugToggle.addEventListener("click", () => {
   el.debugLog.hidden = !open;
   el.debugToggle.setAttribute("aria-expanded", String(open));
 });
+
+function renderDetailToggle() {
+  el.debugDetail.textContent = logDetail ? "Details on" : "Details off";
+  el.debugDetail.setAttribute("aria-pressed", String(logDetail));
+  el.debugDetail.title = logDetail
+    ? "Message text and tool payloads are being logged. Clear before sharing."
+    : "Include message text and tool payloads in the log";
+}
+
+el.debugDetail.addEventListener("click", () => {
+  logDetail = !logDetail;
+  try {
+    localStorage.setItem(DETAIL_KEY, logDetail ? "1" : "0");
+  } catch {
+    // Not persisting is fine; the toggle still holds for this page.
+  }
+  renderDetailToggle();
+  // Only affects what is logged from here on -- lines already in the buffer
+  // were redacted when they were written and stay that way.
+  log("out", logDetail
+    ? "details ON: message text and tool payloads will be logged"
+    : "details off: message text and tool payloads hidden");
+});
+
+renderDetailToggle();
 
 el.debugCopy.addEventListener("click", async () => {
   const text = logLines.join("\n");

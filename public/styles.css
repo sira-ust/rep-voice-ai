@@ -641,6 +641,13 @@ input[type="range"]::-moz-range-thumb {
 
 .btn-mini:hover { color: var(--text); border-color: var(--line-bright); }
 
+/* Details-on is a deliberate, visible state: the log then holds customer data. */
+.btn-mini[aria-pressed="true"] {
+  background: rgba(220, 184, 119, 0.14);
+  border-color: rgba(220, 184, 119, 0.55);
+  color: #e3c68d;
+}
+
 .debug-log {
   margin: 0;
   padding: 9px 11px 11px;
