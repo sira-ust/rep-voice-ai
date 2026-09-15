@@ -441,7 +441,12 @@ async function startConversation() {
 
       onOutgoingEvent: (event) => {
         const type = event && event.type;
-        if (type === "user_audio_chunk") {
+        // The mic frame arrives as {user_audio_chunk: "<base64>"} with no type
+        // field, so matching on event.type never fired: every frame fell
+        // through to the generic branch and was logged whole, ~30 a second.
+        // That buried the 600-line buffer in under 20 seconds -- which is why
+        // a real error was never still on screen by the time anyone looked.
+        if (type === "user_audio_chunk" || (event && event.user_audio_chunk !== undefined)) {
           state.counts.audioSent += 1;
           if (state.counts.audioSent === 1) log("out", "FIRST mic audio chunk sent");
           if (state.counts.audioSent % 50 === 0) {
