@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
-Push the agent's system prompt from agent_prompt.md.
+Push the agent's system prompt and greeting from agent_prompt.md and
+agent_greeting.txt.
 
 Standard library only. Reads ELEVENLABS_* from .env next to this file.
 
     python configure_prompt.py            # show what the agent has now
-    python configure_prompt.py --apply    # upload agent_prompt.md
-    python configure_prompt.py --diff     # compare local file to the agent
+    python configure_prompt.py --apply    # upload both files
+    python configure_prompt.py --diff     # compare local files to the agent
+
+The greeting is the first thing every caller hears, so it is the cheapest
+place to set expectations about what the agent can actually answer.
 
 The prompt is where conversational behaviour lives -- carrying the subject
 across turns, how to search, what not to promise. A one-line prompt like
@@ -29,6 +33,7 @@ import common  # loads .env on import
 
 ROOT = Path(__file__).resolve().parent
 PROMPT_FILE = ROOT / "agent_prompt.md"
+GREETING_FILE = ROOT / "agent_greeting.txt"
 EL_API = "https://api.elevenlabs.io/v1"
 TIMEOUT = 30
 
@@ -61,19 +66,25 @@ def elevenlabs(path: str, method: str = "GET", body: dict | None = None) -> dict
         raise Fail("Could not reach the ElevenLabs API: %s" % (exc.reason,)) from exc
 
 
-def get_prompt() -> tuple[dict, str]:
+def get_prompt() -> tuple[dict, str, str]:
     if not AGENT_ID:
         raise Fail("ELEVENLABS_AGENT_ID is missing from .env")
     agent = elevenlabs("/convai/agents/" + urllib.parse.quote(AGENT_ID))
-    prompt = (agent.get("conversation_config", {})
-              .get("agent", {}).get("prompt", {})) or {}
-    return agent, prompt.get("prompt") or ""
+    cfg = (agent.get("conversation_config", {}).get("agent", {})) or {}
+    prompt = cfg.get("prompt") or {}
+    return agent, prompt.get("prompt") or "", cfg.get("first_message") or ""
 
 
 def local_prompt() -> str:
     if not PROMPT_FILE.is_file():
         raise Fail("%s not found" % PROMPT_FILE.name)
     return PROMPT_FILE.read_text(encoding="utf-8-sig").strip()
+
+
+def local_greeting() -> str:
+    if not GREETING_FILE.is_file():
+        raise Fail("%s not found" % GREETING_FILE.name)
+    return GREETING_FILE.read_text(encoding="utf-8-sig").strip()
 
 
 def main() -> int:
@@ -84,20 +95,27 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        agent, live = get_prompt()
-        print("\n  agent  : %s" % agent.get("name"))
-        print("  live   : %d chars" % len(live))
-        print("  local  : %s (%d chars)" % (PROMPT_FILE.name, len(local_prompt())))
+        agent, live, live_greeting = get_prompt()
+        print("\n  agent    : %s" % agent.get("name"))
+        print("  prompt   : live %d chars, local %d chars"
+              % (len(live), len(local_prompt())))
+        print("  greeting : %s"
+              % ("in sync" if live_greeting == local_greeting()
+                 else "DIFFERS from " + GREETING_FILE.name))
+        print("             %r" % live_greeting)
 
         if args.diff:
-            diff = list(difflib.unified_diff(
-                live.splitlines(), local_prompt().splitlines(),
-                fromfile="agent (live)", tofile=PROMPT_FILE.name, lineterm=""))
-            print("")
-            if not diff:
-                print("  Identical.")
-            for line in diff[:200]:
-                print("  " + line)
+            for live_text, local_text, name in (
+                    (live, local_prompt(), PROMPT_FILE.name),
+                    (live_greeting, local_greeting(), GREETING_FILE.name)):
+                diff = list(difflib.unified_diff(
+                    live_text.splitlines(), local_text.splitlines(),
+                    fromfile="agent (live)", tofile=name, lineterm=""))
+                print("\n  --- %s ---" % name)
+                if not diff:
+                    print("  Identical.")
+                for line in diff[:200]:
+                    print("  " + line)
             print("")
             return 0
 
@@ -109,22 +127,33 @@ def main() -> int:
                 print("  all decided here.")
             print("\n--- live prompt ---")
             print(live or "(empty)")
-            print("\n  --diff to compare, --apply to upload %s\n" % PROMPT_FILE.name)
+            print("\n  --diff to compare, --apply to upload both files\n")
             return 0
 
-        wanted = local_prompt()
-        if wanted == live:
+        wanted, wanted_greeting = local_prompt(), local_greeting()
+        if wanted == live and wanted_greeting == live_greeting:
             print("\n  Already up to date.\n")
             return 0
 
-        print("\n  Applying %s -> agent" % PROMPT_FILE.name)
-        elevenlabs("/convai/agents/" + urllib.parse.quote(AGENT_ID), "PATCH",
-                   {"conversation_config": {"agent": {"prompt": {"prompt": wanted}}}})
+        changes = {}
+        if wanted != live:
+            changes["prompt"] = {"prompt": wanted}
+        if wanted_greeting != live_greeting:
+            changes["first_message"] = wanted_greeting
 
-        _, after = get_prompt()
-        if after.strip() != wanted:
+        print("\n  Applying: %s" % ", ".join(sorted(changes)))
+        elevenlabs("/convai/agents/" + urllib.parse.quote(AGENT_ID), "PATCH",
+                   {"conversation_config": {"agent": changes}})
+
+        # Read back rather than trust the write: a silently dropped field
+        # looks exactly like success otherwise.
+        _, after, after_greeting = get_prompt()
+        if "prompt" in changes and after.strip() != wanted:
             raise Fail("The prompt did not stick (agent now has %d chars)" % len(after))
-        print("  live prompt is now %d chars\n" % len(after))
+        if "first_message" in changes and after_greeting.strip() != wanted_greeting:
+            raise Fail("The greeting did not stick (agent has %r)" % after_greeting)
+        print("  prompt   : %d chars" % len(after))
+        print("  greeting : %r\n" % after_greeting)
     except Fail as exc:
         print("\n  ERROR: %s\n" % exc, file=sys.stderr)
         return 1
