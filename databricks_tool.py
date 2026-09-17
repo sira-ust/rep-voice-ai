@@ -411,6 +411,82 @@ def tool_index() -> dict:
     return out
 
 
+def load_tables() -> dict:
+    """The `tables` block: what each table holds, and what it cannot answer."""
+    raw = json.loads(TOOLS_FILE.read_text(encoding="utf-8-sig"))
+    return (raw.get("tables") or {}) if isinstance(raw, dict) else {}
+
+
+def cmd_check(specs: list[dict]) -> int:
+    """Report anything that goes stale when a table is added or changed.
+
+    Adding a table touches more than this file. The web guide is generated
+    from it so it keeps itself honest, but the agent's tools live on
+    ElevenLabs and the prompt's claims about what the data cannot answer are
+    prose -- neither follows automatically, and a wrong claim is worse than a
+    missing one. The agent will keep refusing a question the new table just
+    made answerable, and nobody will think to look here.
+    """
+    tables = load_tables()
+    problems = []
+
+    print("\n  tools in %s : %d" % (TOOLS_FILE.name, len(specs)))
+
+    # 1. Every table a tool reads must be described, or the guide has a hole.
+    used = {s["table"] for s in specs}
+    for table in sorted(used):
+        if table not in tables:
+            problems.append("%s has no entry in the `tables` block, so the web "
+                            "guide cannot describe it" % table)
+    for table in sorted(set(tables) - used):
+        problems.append("`tables` describes %s but no tool reads it" % table)
+
+    # 2. Everything in the file must actually be on the agent.
+    if AGENT_ID and EL_KEY:
+        live = tool_index()
+        attached = set(agent_prompt(elevenlabs(
+            "/convai/agents/" + urllib.parse.quote(AGENT_ID))).get("tool_ids") or [])
+        for spec in specs:
+            tid = live.get(spec["name"])
+            if not tid:
+                problems.append("%s is in %s but does not exist on ElevenLabs "
+                                "-- run --sync" % (spec["name"], TOOLS_FILE.name))
+            elif tid not in attached:
+                problems.append("%s exists but is not attached to the agent "
+                                "-- run --sync" % spec["name"])
+        print("  attached to agent : %d" % len(attached))
+    else:
+        print("  (skipped the agent check: ELEVENLABS_* not set)")
+
+    # 3. The guide reads these; a tool without them shows up blank.
+    for spec in specs:
+        for field in ("subject", "sample_questions"):
+            if not spec.get(field):
+                problems.append("%s has no %r, so the web guide lists it with "
+                                "nothing to ask" % (spec["name"], field))
+
+    if problems:
+        print("\n  %d problem(s):" % len(problems))
+        for p in problems:
+            print("    - %s" % p)
+    else:
+        print("\n  No drift between the file, the agent and the guide.")
+
+    # The judgement call no check can make. Print the claims so they can be
+    # read against the prompt rather than remembered.
+    print("\n  ---- confirm agent_prompt.md still agrees with these ----")
+    for table, meta in sorted(tables.items()):
+        not_covered = (meta.get("not_covered") or "").strip()
+        if not_covered:
+            print("\n  %s" % (meta.get("label") or table))
+            print("    cannot answer: %s" % not_covered)
+    print("\n  A new table can make a limitation obsolete. agent_prompt.md")
+    print("  states these limits in prose under \"What the data cannot tell")
+    print("  you\" -- if a table now covers one, remove it there and from")
+    print("  agent_greeting.txt, then: python configure_prompt.py --apply\n")
+    return 1 if problems else 0
+
+
 def cmd_sync(specs: list[dict]) -> None:
     need(DATABRICKS_HOST=DBX_HOST, DATABRICKS_WAREHOUSE_ID=DBX_WAREHOUSE,
          ELEVENLABS_AGENT_ID=AGENT_ID)
@@ -454,6 +530,9 @@ def cmd_sync(specs: list[dict]) -> None:
 
     print("\n  agent now has %d tool(s)\n" % len(keep))
     cmd_list(specs)
+    # A sync is exactly when a table was added, so raise the things a sync
+    # cannot fix by itself rather than waiting to be asked.
+    cmd_check(specs)
 
 
 def cmd_list(specs: list[dict]) -> None:
@@ -512,6 +591,8 @@ def main() -> int:
     group.add_argument("--test", nargs=2, metavar=("NAME", "VALUE"), help="run one tool's query")
     group.add_argument("--bench", nargs=2, metavar=("NAME", "VALUE"), help="time one tool's query")
     group.add_argument("--sample", metavar="NAME", help="real values from a lookup column")
+    group.add_argument("--check", action="store_true",
+                       help="report drift between this file, the agent and the prompt")
     group.add_argument("--remove", metavar="NAME", help="detach and delete one tool")
     group.add_argument("--remove-all", action="store_true", help="detach and delete every configured tool")
     parser.add_argument("--count", type=int, default=8, help="rows for --sample")
@@ -527,6 +608,8 @@ def main() -> int:
             cmd_bench(find_spec(specs, args.bench[0]), args.bench[1])
         elif args.sample:
             cmd_sample(find_spec(specs, args.sample), args.count)
+        elif args.check:
+            return cmd_check(specs)
         elif args.remove:
             cmd_remove([args.remove])
         elif args.remove_all:
@@ -534,7 +617,8 @@ def main() -> int:
         else:
             print("")
             cmd_list(specs)
-            print("  --sample NAME to find real values, --sync to push changes.\n")
+            print("  --sample NAME to find real values, --sync to push changes,")
+            print("  --check to see what a new table left stale.\n")
     except Fail as exc:
         print("\n  ERROR: %s\n" % exc, file=sys.stderr)
         return 1

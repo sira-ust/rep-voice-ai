@@ -239,10 +239,39 @@ and re-reads afterwards to confirm the change stuck.
 | Script | What it sets |
 | --- | --- |
 | [configure_llm.py](configure_llm.py) | Point the agent at a custom OpenAI-compatible LLM |
-| [configure_prompt.py](configure_prompt.py) | Upload [agent_prompt.md](agent_prompt.md) as the system prompt |
+| [configure_prompt.py](configure_prompt.py) | Upload [agent_prompt.md](agent_prompt.md) and [agent_greeting.txt](agent_greeting.txt) |
 | [configure_audio.py](configure_audio.py) | Noise filtering and turn-taking |
 | [configure_privacy.py](configure_privacy.py) | Retention, stored audio, zero-retention mode |
 | [databricks_tool.py](databricks_tool.py) | Sync the tools defined in [databricks_tools.json](databricks_tools.json) |
+
+### Adding a table
+
+Four things describe what this agent can do, and they have to move together.
+The web guide builds itself from [databricks_tools.json](databricks_tools.json)
+so it stays honest on its own, but the tools live on ElevenLabs and the prompt
+states the data's limits in prose — neither follows automatically.
+
+1. **Add the tool** to [databricks_tools.json](databricks_tools.json), with
+   `subject` and `sample_questions` so the guide has something to show.
+2. **Describe the table** in the same file's `tables` block: what it holds,
+   its grain, and what it cannot answer.
+3. **Re-read [agent_prompt.md](agent_prompt.md)** under *What the data cannot
+   tell you*, and [agent_greeting.txt](agent_greeting.txt). This is the step
+   that gets missed: a new table can make a stated limit obsolete, and the
+   agent will go on refusing questions it can now answer — a failure nobody
+   reports, because it looks like the agent working normally.
+4. **Re-read any custom guardrail** that repeats one of those limits, if
+   guardrails are enabled.
+
+```sh
+python databricks_tool.py --sync     # pushes the tools, then runs --check
+python databricks_tool.py --check    # drift only, changes nothing
+python configure_prompt.py --apply   # after editing the prompt or greeting
+```
+
+`--check` compares the file, the agent and the guide, exits non-zero if they
+disagree, and prints each table's stated limits so you can read them against
+the prompt. Steps 3 and 4 are judgement, so it reminds rather than decides.
 
 **Testing** — all of these work without a microphone.
 
