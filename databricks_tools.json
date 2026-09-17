@@ -39,7 +39,7 @@
     "ust_databricks.ust_reporting.mart_customer_weekly": {
       "label": "Customer activity",
       "about": "One row per customer per week, for about 2,000 accounts. Records how many orders they submitted and what those orders were worth, whether they ordered themselves or through a rep, how much friction they hit in the app, and whether they are showing a churn signal.",
-      "grain": "weekly — answers always use the most recent week",
+      "grain": "weekly, about 35 weeks of history — a customer lookup returns the last six weeks, so a quiet week can be read against the ones around it",
       "not_covered": "Which products an account ordered. Customer activity and product data are separate here, with no link between them."
     },
     "ust_databricks.ust_reporting.mart_item_demand_supply": {
@@ -63,15 +63,15 @@
         "service_mode"
       ],
       "order_by": "week_start DESC",
-      "limit": 1,
+      "limit": 6,
       "value_label": "customer key",
       "example": "RED005",
-      "description": "Look up ONE CUSTOMER's most recent weekly activity by their customer key, for example RED005. Use this for questions about how a customer is doing, how many orders they placed, their order value, or whether they are at risk of churning. Do not use this for products, parts or stock.",
+      "description": "Look up ONE CUSTOMER's recent weekly activity by their customer key, for example RED005. Returns the last several weeks, newest first, so it answers both how they are doing now and how that compares with earlier weeks -- last week, a few weeks ago, whether they are picking up or falling off. Lead with the most recent week unless the caller asked about an earlier one or about a trend. A single quiet week is not a quiet customer, so check the weeks around it before saying an account has gone silent. Do not use this for products, parts or stock.",
       "subject": "Customers",
       "sample_questions": [
         "How is customer RED005 doing?",
-        "Did POT001 order anything last week?",
-        "Is ACM001 at risk of churning?"
+        "Has RED005 been ordering less lately?",
+        "What did RED005 do last week?"
       ]
     },
     {
