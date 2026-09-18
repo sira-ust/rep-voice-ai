@@ -240,9 +240,44 @@ and re-reads afterwards to confirm the change stuck.
 | --- | --- |
 | [configure_llm.py](configure_llm.py) | Point the agent at a custom OpenAI-compatible LLM |
 | [configure_prompt.py](configure_prompt.py) | Upload [agent_prompt.md](agent_prompt.md) and [agent_greeting.txt](agent_greeting.txt) |
-| [configure_audio.py](configure_audio.py) | Noise filtering and turn-taking |
+| [configure_audio.py](configure_audio.py) | Noise filtering and turn-taking — see *Background speakers* below |
 | [configure_privacy.py](configure_privacy.py) | Retention, stored audio, zero-retention mode |
 | [databricks_tool.py](databricks_tool.py) | Sync the tools defined in [databricks_tools.json](databricks_tools.json) |
+
+### Background speakers
+
+The browser side is already as good as it gets: the ElevenLabs SDK requests
+`voiceIsolation`, `echoCancellation`, `noiseSuppression` and `autoGainControl`
+on the microphone, with no way to ask for more. `voiceIsolation` is the one
+that suppresses other voices in the room, and it is Chrome and Edge only —
+Firefox and Safari ignore it silently, so the same room will be noticeably
+more sensitive there.
+
+That leaves two settings on the agent, both deliberate:
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| `background_voice_detection` | `on` | ElevenLabs defaults this off |
+| `turn_eagerness` | `normal` | `eager` fired on fragments of other people's speech |
+
+`eager` was set originally to shave latency, and it does — but it commits to a
+turn on the slightest speech-shaped sound, which in a shared room means
+answering someone who was not talking to it. `normal` waits for a natural
+break, costing a few hundred milliseconds a turn.
+
+```sh
+python configure_audio.py --eagerness normal   # current
+python configure_audio.py --eagerness eager    # revert if latency matters more
+python configure_audio.py --noisy              # goes further: decisive turn ends
+```
+
+These live on ElevenLabs, not in a file here, so run the command again after
+rebuilding an agent from scratch.
+
+**None of this separates speakers.** There is no diarization on the input side
+— it is one audio stream, and the filtering decides *primary voice or not*, not
+*who is talking*. For users on speakerphone in a shared room, a headset beats
+every setting above.
 
 ### Adding a table
 
