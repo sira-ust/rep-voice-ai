@@ -207,25 +207,44 @@ def token_limit() -> int:
 LOGIN_PAGE = """<!doctype html>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sign in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap">
 <style>
-:root{color-scheme:dark}
+/* PDA 2.0 light theme, mirroring public/styles.css. Kept inline and
+   self-contained: this page is served before a session exists, so it cannot
+   depend on anything behind the login. If Google Fonts is blocked -- as it is
+   on some mainland China networks -- the system stack below takes over and
+   nothing else changes. */
+:root{
+ color-scheme:light;
+ --blue:#2196F3;--blue-d:#1877D2;--ink:#1A2A3A;--muted:#5C6978;
+ --line:#E3E9F0;--bg:#F4F7FB;--strip:#E4E9EF;--red:#D6584F;
+ --font:"Nunito",ui-sans-serif,system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,sans-serif}
 body{margin:0;min-height:100vh;display:grid;place-items:center;
- background:radial-gradient(900px 480px at 50% -140px,#151a33,transparent 70%) #08090d;
- color:#eceef4;font:15px/1.5 ui-sans-serif,system-ui,"Segoe UI",sans-serif}
-form{background:#101219;border:1px solid #22262f;border-radius:16px;padding:28px;
- width:min(340px,90vw);display:grid;gap:14px;box-shadow:0 10px 40px -20px #000}
-h1{margin:0;font-size:17px;font-weight:600;letter-spacing:-.01em}
-p{margin:0;font-size:13px;color:#a3abbd}
-label{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:#6f7789}
-input{font:inherit;background:#08090d;border:1px solid #22262f;color:#eceef4;
- border-radius:8px;padding:9px 11px;width:100%;box-sizing:border-box}
-input:focus{outline:none;border-color:#6b7cff;box-shadow:0 0 0 3px rgba(107,124,255,.14)}
-button{font:inherit;font-weight:560;background:linear-gradient(180deg,#8290ff,#6b7cff);
- color:#fff;border:0;border-radius:999px;padding:11px;cursor:pointer;margin-top:4px}
-.err{background:rgba(242,98,111,.09);border:1px solid rgba(242,98,111,.3);
- color:#ffb0b7;border-radius:8px;padding:9px 11px;font-size:13px}
+ background:radial-gradient(900px 480px at 50% -140px,#E9EEF6 0%,transparent 70%) var(--bg);
+ color:var(--ink);font:15px/1.5 var(--font);-webkit-font-smoothing:antialiased}
+form{background:#fff;border:1px solid var(--line);border-radius:18px;padding:28px;
+ width:min(340px,90vw);display:grid;gap:14px;box-shadow:0 10px 40px -24px rgba(26,42,58,.45)}
+.mark{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;
+ background:var(--blue);box-shadow:0 3px 10px -3px rgba(33,150,243,.55);color:#fff;font-weight:800;font-size:15px}
+h1{margin:0;font-size:17px;font-weight:800;letter-spacing:-.01em}
+p{margin:0;font-size:13px;color:var(--muted)}
+label{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+input{font:inherit;background:var(--strip);border:1px solid var(--line);color:var(--ink);
+ border-radius:10px;padding:9px 11px;width:100%;box-sizing:border-box;margin-top:5px}
+input:focus{outline:none;background:#fff;border-color:var(--blue);box-shadow:0 0 0 3px rgba(33,150,243,.14)}
+/* PDA solidbtn: solid fill, soft shadow; pressed is a darkening, never a gradient. */
+button{font:inherit;font-weight:800;background:var(--blue);color:#fff;border:0;
+ border-radius:999px;padding:12px;cursor:pointer;margin-top:4px;
+ box-shadow:0 8px 18px -8px rgba(33,150,243,.55);transition:background .15s,box-shadow .2s,transform .08s}
+button:active{background:var(--blue-d);box-shadow:none;transform:scale(.99)}
+:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.err{background:rgba(214,88,79,.08);border:1px solid rgba(214,88,79,.28);
+ color:#B23A30;border-radius:10px;padding:9px 11px;font-size:13px}
 </style>
 <form method="post" action="/login">
+  <div class="mark" aria-hidden="true">U</div>
   <h1>Voice agent</h1>
   <p>Internal tool. Sign in to continue.</p>
   __ERROR__
