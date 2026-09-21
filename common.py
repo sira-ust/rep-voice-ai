@@ -23,6 +23,28 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 ENV_FILE = ROOT / ".env"
 
+
+def _utf8_console() -> None:
+    """Let these scripts print non-ASCII on a Windows console.
+
+    A Windows terminal hands Python cp1252, which cannot encode a Chinese
+    character: printing one raises UnicodeEncodeError and takes the script
+    down. Now that the agent answers in Chinese, that turned every test run
+    against a Chinese phrase into a crash rather than a result.
+
+    errors="replace" so an unexpected glyph degrades to a question mark
+    instead of ending the run.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            # Redirected to a pipe or replaced by a test harness: leave it be.
+            pass
+
+
+_utf8_console()
+
 # Keys whose values must never be printed.
 SECRET_KEYS = (
     "ELEVENLABS_API_KEY", "DATABRICKS_TOKEN", "DATABRICKS_WARM_TOKEN",
