@@ -180,6 +180,11 @@ function clearError() {
 }
 
 /** Append a transcript bubble and return the node so it can be updated later. */
+// CJK Unified Ideographs, the Extension A block below it, and the compatibility
+// block above. Kana are deliberately absent: this asks "is this Han text", and
+// the answer decides glyph shapes, not which language the agent replied in.
+const HAN = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/;
+
 function addMessage(text, kind) {
   // A typed message is echoed locally; if the server also relays it back as a
   // user transcript, drop the duplicate rather than showing it twice.
@@ -193,6 +198,14 @@ function addMessage(text, kind) {
   const node = document.createElement("div");
   node.className = `msg msg-${kind}`;
   node.textContent = text;
+  // Han characters are unified across Chinese and Japanese in Unicode: the same
+  // codepoint is drawn with different strokes depending on the language, and the
+  // browser decides which using `lang`. The document is lang="en", so a Chinese
+  // reply inherits it and can be rendered in Japanese letterforms wherever the
+  // fallback font supports both. Tagging the bubble by what is actually in it
+  // keeps the agent's own detection as the only thing choosing a language --
+  // there is no picker to get out of step with.
+  if (HAN.test(text)) node.lang = "zh";
   el.transcript.appendChild(node);
   el.transcript.scrollTop = el.transcript.scrollHeight;
   return node;
