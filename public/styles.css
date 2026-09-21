@@ -56,14 +56,7 @@
 
   --text: var(--pda-ink);
   --text-2: var(--pda-muted);
-  --text-3: #5C6978;        /* not in the PDA token set. Was #A9B3C0, a step lighter
-                               than --muted, which carried over from the dark theme
-                               where it sat on near-black. On white it measures
-                               2.1:1 and is effectively unreadable -- and it is the
-                               token behind field labels, the debug timestamps, the
-                               guide's table names and every meta line. Darkened to
-                               clear 4.5:1 on white, on the page and on the debug
-                               panel, keeping the blue-grey cast of --pda-muted. */
+  --text-3: #A9B3C0;        /* not in the PDA token set; one step lighter than --muted, for tertiary/meta text */
 
   --accent: var(--pda-blue);
   --accent-hot: #4DA8F5;    /* PDA has no defined "brighter" state; one step lighter than --accent for hover/emphasis */
