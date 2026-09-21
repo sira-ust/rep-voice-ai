@@ -211,14 +211,18 @@ LOGIN_PAGE = """<!doctype html>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap">
 <style>
-/* PDA 2.0 light theme, mirroring public/styles.css. Kept inline and
-   self-contained: this page is served before a session exists, so it cannot
-   depend on anything behind the login. If Google Fonts is blocked -- as it is
-   on some mainland China networks -- the system stack below takes over and
-   nothing else changes. */
+/* PDA 2.0 light theme, using the same token values as public/styles.css --
+   including --muted at PDA's #8A97A6, so the sign-in page and the app agree
+   exactly rather than this page quietly running its own palette.
+
+   Kept inline and self-contained: this page is served before a session
+   exists, and every static route behind the login requires one, so a shared
+   stylesheet would either 401 or need its own hole in the auth check. If
+   Google Fonts is blocked -- as it is on some mainland China networks -- the
+   system stack below takes over and nothing else changes. */
 :root{
  color-scheme:light;
- --blue:#2196F3;--blue-d:#1877D2;--ink:#1A2A3A;--muted:#5C6978;
+ --blue:#2196F3;--blue-d:#1877D2;--ink:#1A2A3A;--muted:#8A97A6;
  --line:#E3E9F0;--bg:#F4F7FB;--strip:#E4E9EF;--red:#D6584F;
  --font:"Nunito",ui-sans-serif,system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,sans-serif}
 body{margin:0;min-height:100vh;display:grid;place-items:center;
