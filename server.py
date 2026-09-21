@@ -138,12 +138,18 @@ _INSECURE_SET_EXPLICITLY = _INSECURE_ENV != ""
 # The browser loads the SDK from jsDelivr and talks to ElevenLabs directly, so
 # both have to be allowed. blob: is required: the SDK builds its AudioWorklet
 # from a blob URL, and revoking that permission silently kills the microphone.
+#
+# styles.css @imports Nunito from Google Fonts, which needs the stylesheet host
+# in style-src and the font files in font-src -- font-src is not inherited from
+# style-src, and without it the CSS loads while every glyph is blocked. Neither
+# failure shows up as anything but the wrong typeface.
 CSP_POLICY = (
     "default-src 'self'; "
     "script-src 'self' blob: https://cdn.jsdelivr.net; "
     "worker-src 'self' blob:; "
     "child-src 'self' blob:; "
-    "style-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src 'self' https://fonts.gstatic.com; "
     "img-src 'self' data:; "
     "media-src 'self' blob: mediastream:; "
     "connect-src 'self' https://cdn.jsdelivr.net https://api.elevenlabs.io "
