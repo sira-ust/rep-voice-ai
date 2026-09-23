@@ -195,6 +195,30 @@ def converse(messages: list[str], quiet: float = 10.0, cap: float = 75.0,
     return result
 
 
+def _values(parameters) -> list:
+    """The argument values from a tool call, whatever shape they arrive in.
+
+    ElevenLabs is not consistent here. A resolved call carries a list of
+    {name, type, value} objects, but the model's raw request for the same tool
+    can arrive as a bare {"value": ...} object instead, and system tools use
+    their own shapes again. Iterating a dict yields its keys, so assuming the
+    list form turned a str into the thing being asked for .get -- a crash in
+    the test tooling rather than in the agent, but it took the run down with it.
+    """
+    if isinstance(parameters, dict):
+        if "value" in parameters:
+            return [parameters["value"]]
+        return [v for v in parameters.values() if v is not None]
+    out = []
+    for item in (parameters or []):
+        if isinstance(item, dict):
+            if item.get("value") is not None:
+                out.append(item["value"])
+        elif item is not None:
+            out.append(item)
+    return out
+
+
 def tool_calls(conversation_id: str, attempts: int = 8, pause: float = 3.0) -> list:
     """What the model sent to each tool, and how many rows came back.
 
@@ -215,8 +239,7 @@ def tool_calls(conversation_id: str, attempts: int = 8, pause: float = 3.0) -> l
                     params = {}
                 calls.append({
                     "tool": call.get("tool_name"),
-                    "values": [x.get("value") for x in (params.get("parameters") or [])
-                               if x.get("value") is not None],
+                    "values": _values(params.get("parameters")),
                     "rows": 0,
                 })
         for turn in detail.get("transcript", []):

@@ -36,11 +36,23 @@
     "with --check, which catches 1 and 2 and reminds you about 3 and 4."
   ],
   "tables": {
-    "ust_databricks.ust_reporting.mart_customer_weekly": {
-      "label": "Customer activity",
-      "about": "One row per customer per week, for about 2,000 accounts. Records how many orders they submitted and what those orders were worth, whether they ordered themselves or through a rep, how much friction they hit in the app, and whether they are showing a churn signal.",
-      "grain": "weekly, about 35 weeks of history — a customer lookup returns the last six weeks, so a quiet week can be read against the ones around it",
-      "not_covered": "Which products an account ordered. Customer activity and product data are separate here, with no link between them."
+    "ust_databricks.ust_dims.dim_customers": {
+      "label": "Customer directory",
+      "about": "Every active account: name, city, county, post code, the rep who owns it, delivery days and whether an appointment is needed. This is how a store name spoken out loud becomes an account key.",
+      "grain": "one row per account, current",
+      "not_covered": "Store names repeat -- many accounts share one, and some names cover twenty-odd different stores. A name alone never identifies an account; the city and the owning rep are what separate them."
+    },
+    "ust_databricks.ust_reporting.mart_rep_account_status": {
+      "label": "Account activity and who to call",
+      "about": "One row per rep-and-account: when they last ordered, how long it has been, orders and order value recently and all time, their delivery days, and whether the account is flagged for attention and why.",
+      "grain": "current, stamped with the day it was built",
+      "not_covered": "Built from orders submitted through the app, so an account that orders by phone or email can look quiet when it is not. It also holds no invoices, returns, balances or credit terms, and nothing about which items an account buys."
+    },
+    "ust_databricks.ust_reporting.mart_rep_period_status": {
+      "label": "How a rep is doing",
+      "about": "A rep's current month: orders submitted, total and average order value, their largest order, how many accounts ordered, a projection of where the month lands at this pace, and the same figures for the month before.",
+      "grain": "current month per rep, stamped with the day it was built",
+      "not_covered": "There is no target to compare against, so it cannot say whether a rep will hit their number. No margin, no branded share, no commission. These are orders submitted, not invoiced sales, and the two never tie out exactly."
     },
     "ust_databricks.ust_reporting.mart_item_demand_supply": {
       "label": "Product stock and demand",
@@ -51,51 +63,129 @@
   },
   "tools": [
     {
-      "name": "lookup_customer_week",
-      "table": "ust_databricks.ust_reporting.mart_customer_weekly",
-      "lookup_column": "customer_key",
+      "name": "find_customer_by_name",
+      "table": "ust_databricks.ust_dims.dim_customers",
+      "lookup_column": "customer_name",
+      "match": "all_words",
       "columns": [
         "customer_key",
-        "week_start",
-        "orders_submitted",
-        "order_value_total",
-        "churn_signal",
-        "service_mode"
+        "customer_name",
+        "city",
+        "post_code",
+        "owner_rep_name"
       ],
-      "order_by": "week_start DESC",
+      "filters": [
+        "is_active",
+        "NOT is_test_account"
+      ],
+      "order_by": "customer_name",
       "limit": 6,
-      "value_label": "customer key",
-      "example": "RED005",
-      "description": "Look up ONE CUSTOMER's recent weekly activity by their customer key, for example RED005. Returns the last several weeks, newest first, so it answers both how they are doing now and how that compares with earlier weeks -- last week, a few weeks ago, whether they are picking up or falling off. Lead with the most recent week unless the caller asked about an earlier one or about a trend. A single quiet week is not a quiet customer, so check the weeks around it before saying an account has gone silent. Do not use this for products, parts or stock.",
-      "subject": "Customers",
+      "value_label": "store or account being asked about",
+      "example": "asian market",
+      "description": "Find a customer's account key from the name a caller said out loud. Use this FIRST whenever someone names a store rather than giving a key. Returns every active account matching those words with its city, post code and owning rep, because store names repeat -- many accounts share a name. Read the city and owner back and ask which one they mean before looking anything else up. Do not use this for products.",
+      "subject": "Accounts",
       "sample_questions": [
-        "How is customer RED005 doing?",
-        "Has RED005 been ordering less lately?",
-        "What did RED005 do last week?"
+        "How is Asian Market doing?",
+        "Look up Lee's Sandwiches"
       ]
     },
     {
-      "name": "lookup_item_supply",
-      "table": "ust_databricks.ust_reporting.mart_item_demand_supply",
-      "lookup_column": "prtnum",
+      "name": "lookup_account_status",
+      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
+      "lookup_column": "customer_key",
+      "match": "exact",
       "columns": [
-        "prtnum",
-        "item_name",
-        "week_start",
-        "shippable_eow",
-        "avg_on_hand_qty",
-        "days_out_of_stock",
-        "signal"
+        "customer_name",
+        "city",
+        "rep_name",
+        "last_order_date",
+        "days_since_last_order",
+        "orders_recent",
+        "order_value_recent",
+        "order_value_avg",
+        "orders_all_time",
+        "delivery_days",
+        "appointment_required",
+        "attention_reason",
+        "as_of_date"
       ],
-      "order_by": "week_start DESC",
+      "order_by": "days_since_last_order",
       "limit": 1,
-      "value_label": "part number",
-      "example": "11050",
-      "description": "Look up ONE PRODUCT's most recent weekly stock and demand by its part number. Use this for questions about availability, how much of an item is in stock or shippable, or whether an item has been out of stock recently. Do not use this for customers or sales reps.",
-      "subject": "Products",
+      "value_label": "customer key",
+      "example": "RED005",
+      "description": "How ONE account is doing, by its customer key. Use for how an account is performing, when they last ordered, how long it has been, their recent order value, which days they accept deliveries and whether they need attention. If the caller gave a name instead of a key, run find_customer_by_name first. Do not use this for products or for a rep's own numbers.",
+      "subject": "Accounts",
       "sample_questions": [
-        "How much of part number 11050 can we ship?",
-        "Has Chaokoh coconut milk been out of stock recently?"
+        "How is RED005 doing?",
+        "When did RED005 last order?",
+        "Which days does RED005 take deliveries?"
+      ]
+    },
+    {
+      "name": "lookup_rep_month",
+      "table": "ust_databricks.ust_reporting.mart_rep_period_status",
+      "lookup_column": "rep_name",
+      "match": "contains",
+      "columns": [
+        "rep_name",
+        "period_start",
+        "as_of_date",
+        "days_elapsed",
+        "days_in_period",
+        "orders_submitted",
+        "order_value_total",
+        "order_value_avg",
+        "order_value_largest",
+        "accounts_ordered",
+        "order_value_projected",
+        "prev_order_value_total",
+        "order_value_change_pct"
+      ],
+      "filters": [
+        "period_type = 'month'",
+        "is_current"
+      ],
+      "limit": 1,
+      "value_label": "rep being asked about",
+      "example": "Ken Tov",
+      "description": "How ONE REP is doing this month, by their name. Use for a rep asking about their own performance -- orders submitted, total and average order value, their biggest order, how many accounts ordered, where they are on pace to land by month end, and how that compares with last month. This is the rep's own numbers, not one account's: for a single store use lookup_account_status.",
+      "subject": "My performance",
+      "sample_questions": [
+        "How am I doing this month?",
+        "How does that compare to last month?",
+        "Where will I land by month end?"
+      ]
+    },
+    {
+      "name": "rank_accounts_to_call",
+      "kind": "rank",
+      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
+      "columns": [
+        "customer_name",
+        "city",
+        "rep_name",
+        "days_since_last_order",
+        "order_value_recent",
+        "attention_reason",
+        "delivery_days"
+      ],
+      "filters": [
+        "needs_attention",
+        "customer_is_active"
+      ],
+      "modes": {
+        "most_overdue": "-days_since_last_order",
+        "biggest_accounts": "-order_value_all_time",
+        "quietest_accounts": "days_since_last_order"
+      },
+      "limit": 6,
+      "value_label": "ranking mode",
+      "example": "most_overdue",
+      "description": "Accounts that need a call, across the book. Use when someone asks who to call, who has gone quiet, or which accounts need attention -- a group question, not one named store. Pass exactly one of: most_overdue, biggest_accounts, quietest_accounts. Returns six accounts with why each was flagged. If the caller named one specific account, use lookup_account_status instead.",
+      "subject": "Who to call",
+      "sample_questions": [
+        "Who should I call today?",
+        "Which accounts have gone quiet?"
       ]
     },
     {
@@ -122,31 +212,27 @@
       ]
     },
     {
-      "name": "rank_customers",
-      "kind": "rank",
-      "table": "ust_databricks.ust_reporting.mart_customer_weekly",
-      "latest_week_column": "week_start",
+      "name": "lookup_item_supply",
+      "table": "ust_databricks.ust_reporting.mart_item_demand_supply",
+      "lookup_column": "prtnum",
       "columns": [
-        "customer_key",
-        "orders_submitted",
-        "order_value_total",
-        "churn_signal"
+        "prtnum",
+        "item_name",
+        "week_start",
+        "shippable_eow",
+        "avg_on_hand_qty",
+        "days_out_of_stock",
+        "signal"
       ],
-      "modes": {
-        "top_by_order_value": "-order_value_total",
-        "lowest_by_order_value": "order_value_total",
-        "top_by_orders": "-CAST(orders_submitted AS DOUBLE)",
-        "lowest_by_orders": "CAST(orders_submitted AS DOUBLE)"
-      },
-      "limit": 5,
-      "value_label": "ranking mode",
-      "example": "top_by_order_value",
-      "description": "Rank customers for the most recent week. Use this when the caller asks about customers as a group rather than one named account -- best, worst, busiest, quietest, highest or lowest spending. Decide which ranking they mean and pass exactly one of: top_by_order_value, lowest_by_order_value, top_by_orders, lowest_by_orders. Returns five customers. If the caller named a specific customer key, use lookup_customer_week instead.",
-      "subject": "Customers",
+      "order_by": "week_start DESC",
+      "limit": 1,
+      "value_label": "part number",
+      "example": "11050",
+      "description": "Look up ONE PRODUCT's most recent weekly stock and demand by its part number. Use this for questions about availability, how much of an item is in stock or shippable, or whether an item has been out of stock recently. Do not use this for customers or sales reps.",
+      "subject": "Products",
       "sample_questions": [
-        "Which accounts are spending the most?",
-        "Who are my busiest customers?",
-        "Which accounts have gone quiet?"
+        "How much of part number 11050 can we ship?",
+        "Has Chaokoh coconut milk been out of stock recently?"
       ]
     }
   ]

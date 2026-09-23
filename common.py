@@ -23,6 +23,29 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 ENV_FILE = ROOT / ".env"
 
+
+def _utf8_console() -> None:
+    """Let these scripts print non-ASCII on a Windows console.
+
+    A Windows terminal hands Python cp1252, which cannot encode most of what
+    comes back from these tables: printing one such character raises
+    UnicodeEncodeError and takes the whole script down. Store names carry
+    accents and punctuation from the source system, so a lookup that returns
+    the wrong account is not the worst case -- a crash mid-listing is.
+
+    errors="replace" so an unexpected glyph degrades to a question mark
+    instead of ending the run.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            # Redirected to a pipe or replaced by a test harness: leave it be.
+            pass
+
+
+_utf8_console()
+
 # Keys whose values must never be printed.
 SECRET_KEYS = (
     "ELEVENLABS_API_KEY", "DATABRICKS_TOKEN", "DATABRICKS_WARM_TOKEN",

@@ -126,6 +126,12 @@ def statement(spec: dict) -> str:
 
     `latest_week_column` pins the query to the newest period, so a search over a
     weekly-snapshot table returns each product once rather than once per week.
+
+    `filters` are extra WHERE clauses written here and fixed in the query. They
+    are never supplied by the model -- the point of pinning the SQL is that the
+    model chooses a value, never a predicate -- so they are the place to say
+    things like "the current period only" or "active accounts only", which
+    several of these tables need before a row means what it appears to mean.
     """
     columns = spec.get("columns") or []
     select = ", ".join(columns) if columns else "*"
@@ -144,7 +150,7 @@ def statement(spec: dict) -> str:
             "WHEN '%s' THEN %s" % (name, expr) for name, expr in modes.items())
         order = "CASE :lookup_value %s END ASC NULLS LAST" % branches
 
-        where = []
+        where = list(spec.get("filters") or [])
         period = spec.get("latest_week_column")
         if period:
             where.append("%s = (SELECT MAX(%s) FROM %s)" % (period, period, table))
@@ -177,6 +183,7 @@ def statement(spec: dict) -> str:
     period = spec.get("latest_week_column")
     if period:
         where.append("%s = (SELECT MAX(%s) FROM %s)" % (period, period, table))
+    where.extend(spec.get("filters") or [])
 
     sql = "SELECT %s FROM %s WHERE %s" % (select, table, " AND ".join(where))
     if spec.get("order_by"):
@@ -335,7 +342,11 @@ def ensure_secret() -> str:
 
 def tool_payload(spec: dict, secret_id: str) -> dict:
     label = spec.get("value_label") or spec["lookup_column"]
-    hint = "The exact %s to search for." % label
+    # Avoid the word "name" in this hint. The parameter object has a field
+    # called `name`, and a label like "customer name" led the model to put the
+    # store it was looking up there instead of in `value`, overriding a
+    # constant and failing the call.
+    hint = "The %s to look up. This goes in the 'value' field." % label
     if spec.get("example"):
         hint += " For example %s." % spec["example"]
 
@@ -371,7 +382,21 @@ def tool_payload(spec: dict, secret_id: str) -> dict:
                         # The only model-supplied value.
                         "parameters": {
                             "type": "array",
-                            "description": "Always exactly one element, holding the value to look up.",
+                            # Both failure modes below are ones gemma4-26b
+                            # actually produced: `parameters` sent as a bare
+                            # object rather than a list, and the looked-up value
+                            # written into `name`, overriding a constant. Each
+                            # fails the call outright, so the schema says in
+                            # words what the JSON types already say.
+                            "description": (
+                                "A JSON array -- square brackets -- holding exactly "
+                                "one object, like: "
+                                "[{\"name\": \"lookup_value\", \"type\": \"STRING\", "
+                                "\"value\": \"<what you are looking up>\"}]. "
+                                "Never send this as a bare object. Fill in 'value' "
+                                "and nothing else: 'name' and 'type' are fixed and "
+                                "must be sent exactly as shown. Putting what you are "
+                                "looking up into 'name' makes the query fail."),
                             "items": {
                                 "type": "object",
                                 "required": ["name", "value", "type"],
@@ -454,6 +479,18 @@ def cmd_check(specs: list[dict]) -> int:
             elif tid not in attached:
                 problems.append("%s exists but is not attached to the agent "
                                 "-- run --sync" % spec["name"])
+        # And the other direction. A tool dropped from this file can stay
+        # attached -- the agent goes on offering a lookup nothing here
+        # describes, against a table the guide no longer mentions, which is
+        # how an answer arrives from a source nobody thought was still wired
+        # up. --sync does not always detach these, so name them.
+        configured_ids = {live.get(s["name"]) for s in specs}
+        by_id = {tid: name for name, tid in live.items()}
+        for tid in sorted(attached - configured_ids):
+            problems.append("%s is attached to the agent but is not in %s "
+                            "-- remove it with --remove %s"
+                            % (by_id.get(tid, tid), TOOLS_FILE.name,
+                               by_id.get(tid, tid)))
         print("  attached to agent : %d" % len(attached))
     else:
         print("  (skipped the agent check: ELEVENLABS_* not set)")
