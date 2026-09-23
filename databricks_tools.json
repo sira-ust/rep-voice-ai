@@ -352,13 +352,14 @@
       "answer_example": "Red Apple Market last ordered on the twenty-second, one day ago. Twenty-three orders recently, averaging about twenty-four thousand dollars."
     },
     {
-      "name": "rank_accounts_to_call",
-      "kind": "rank",
+      "name": "lookup_accounts_to_call",
       "table": "ust_databricks.ust_reporting.mart_rep_account_status",
+      "lookup_column": "rep_name",
+      "match": "contains",
       "columns": [
         "customer_name",
         "city",
-        "rep_name",
+        "customer_key",
         "days_since_last_order",
         "order_value_recent",
         "attention_reason",
@@ -370,22 +371,17 @@
         "days_since_last_order IS NOT NULL",
         "days_since_last_order <= 365"
       ],
-      "modes": {
-        "longest_since_order": "-days_since_last_order",
-        "biggest_accounts": "-order_value_all_time",
-        "most_urgent": "attention_priority"
-      },
+      "order_by": "attention_priority, days_since_last_order DESC",
       "limit": 6,
-      "value_label": "ranking mode",
-      "example": "longest_since_order",
-      "description": "Accounts that need a call, across the book, limited to those seen within the last year so the list is actionable. Use when someone asks who to call, who has gone quiet, or which accounts need attention -- a group question, not one named store. Pass exactly one of: longest_since_order, biggest_accounts, most_urgent. Returns six accounts with why each was flagged. For one specific account use lookup_account_status; for accounts near where a rep is standing use lookup_nearby_accounts.",
+      "value_label": "rep whose accounts to list",
+      "example": "Ryan Tran",
+      "description": "Which of ONE REP's OWN accounts need a call, most urgent first. Requires the rep's name: these are their accounts, nobody else's, so never call this without knowing who you are speaking to -- ask first. Use when a rep asks who to call or visit, who has gone quiet, or which of their accounts need attention. Covers accounts seen within the last year. For one named store use lookup_account_status; for accounts near where they are standing use lookup_nearby_accounts.",
       "subject": "Who should I call?",
       "sample_questions": [
-        "Who should I call today?",
-        "Which accounts have gone quiet?",
-        "Which of my biggest accounts need attention?"
+        "Which customers should I visit first today?",
+        "Which of my accounts have gone quiet?"
       ],
-      "answer_example": "Powell Butte Grocery in Portland has not ordered in a year, then Rabbit Kitchen in San Mateo. Both are flagged overdue."
+      "answer_example": "Six of yours need a call. Tan Viet Oriental Food in Salina is the longest, three hundred and forty-three days, then Asian Market Grocery in Milwaukee."
     },
     {
       "name": "lookup_nearby_accounts",

@@ -242,6 +242,11 @@ def tool_calls(conversation_id: str, attempts: int = 8, pause: float = 3.0) -> l
                     "values": _values(params.get("parameters")),
                     "rows": 0,
                 })
+        # Pair each result with its own call. This used to hand every result to
+        # the first call still showing zero rows, which silently swapped the
+        # numbers around whenever one lookup in a conversation came back empty
+        # -- and then the test output blamed the wrong tool.
+        pending = {}
         for turn in detail.get("transcript", []):
             for res in (turn.get("tool_results") or []):
                 try:
@@ -249,10 +254,11 @@ def tool_calls(conversation_id: str, attempts: int = 8, pause: float = 3.0) -> l
                 except (ValueError, TypeError):
                     continue
                 rows = len(((value.get("result") or {}).get("data_array")) or [])
-                for call in calls:
-                    if call["rows"] == 0:
-                        call["rows"] = rows
-                        break
+                pending.setdefault(res.get("tool_name"), []).append(rows)
+        for call in calls:
+            queue = pending.get(call["tool"])
+            if queue:
+                call["rows"] = queue.pop(0)
         if calls:
             return calls
         if attempt < attempts - 1:
