@@ -184,7 +184,10 @@
         "What does Red Apple Market usually buy?",
         "What are their top items?"
       ],
-      "answer_example": "They buy KYJ Pork Sausage most often — five hundred and ninety-five times, last on the eleventh of August."
+      "answer_example": "They buy KYJ Pork Sausage most often — five hundred and ninety-five times, last on the eleventh of August.",
+      "filters": [
+        "item_label IS NOT NULL"
+      ]
     },
     {
       "name": "lookup_pitch_list",
@@ -215,7 +218,10 @@
         "What should I sell Red Apple Market?",
         "What should I talk to them about?"
       ],
-      "answer_example": "They are due for Soy Bean with Ginger Sauce, and Punjas Butter Snap Cookies are worth a mention. Want the detail on either?"
+      "answer_example": "They are due for Soy Bean with Ginger Sauce, and Punjas Butter Snap Cookies are worth a mention. Want the detail on either?",
+      "filters": [
+        "item_label IS NOT NULL"
+      ]
     },
     {
       "name": "search_items",

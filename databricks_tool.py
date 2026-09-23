@@ -410,9 +410,18 @@ def tool_payload(spec: dict, secret_id: str) -> dict:
                     },
                 },
                 # Databricks' reply is verbose; show the model only the rows.
+                #
+                # total_row_count earns its place. A query matching nothing
+                # returns no data_array at all, so the model saw exactly
+                # {"status": {"state": "SUCCEEDED"}} -- a success with no
+                # contents -- and filled the silence: asked for a store that
+                # does not exist, it answered with a city and an owning rep it
+                # had invented. An explicit zero is much harder to talk past
+                # than an absent key.
                 "response_filter": {
                     "mode": "allow",
                     "filters": ["result.data_array",
+                                "manifest.total_row_count",
                                 "manifest.schema.columns.name",
                                 "status.state"],
                 },
