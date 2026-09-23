@@ -87,65 +87,40 @@
   },
   "tools": [
     {
-      "name": "find_customer_by_name",
-      "table": "ust_databricks.ust_dims.dim_customers",
-      "lookup_column": "customer_name",
-      "match": "all_words",
+      "name": "lookup_rep_month",
+      "table": "ust_databricks.ust_reporting.mart_rep_period_status",
+      "lookup_column": "rep_name",
+      "match": "contains",
       "columns": [
-        "customer_key",
-        "customer_name",
-        "city",
-        "post_code",
-        "owner_rep_name"
+        "rep_name",
+        "period_start",
+        "as_of_date",
+        "days_elapsed",
+        "days_in_period",
+        "orders_submitted",
+        "order_value_total",
+        "order_value_avg",
+        "order_value_largest",
+        "accounts_ordered",
+        "order_value_projected",
+        "prev_order_value_total",
+        "order_value_change_pct"
       ],
       "filters": [
-        "is_active",
-        "NOT is_test_account"
+        "period_type = 'month'",
+        "is_current"
       ],
-      "order_by": "customer_name",
-      "limit": 6,
-      "value_label": "store or account being asked about",
-      "example": "asian market",
-      "description": "Find a customer's account key from the name a caller said out loud. Use this FIRST whenever someone names a store rather than giving a key. Returns every active account matching those words with its city, post code and owning rep, because store names repeat -- many accounts share a name. Read the city and owner back and ask which one they mean before looking anything else up. Do not use this for products.",
-      "subject": "Accounts",
-      "sample_questions": [
-        "How is Asian Market doing?",
-        "Look up Lee's Sandwiches"
-      ],
-      "answer_example": "I found one Red Apple Market in Anchorage, owned by Tech Tov. Would you like their recent activity?"
-    },
-    {
-      "name": "lookup_account_status",
-      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
-      "lookup_column": "customer_key",
-      "match": "exact",
-      "columns": [
-        "customer_name",
-        "city",
-        "rep_name",
-        "last_order_date",
-        "days_since_last_order",
-        "orders_recent",
-        "order_value_recent",
-        "order_value_avg",
-        "orders_all_time",
-        "delivery_days",
-        "appointment_required",
-        "attention_reason",
-        "as_of_date"
-      ],
-      "order_by": "days_since_last_order",
       "limit": 1,
-      "value_label": "customer key",
-      "example": "RED005",
-      "description": "How ONE account is doing, by its customer key. Use for how an account is performing, when they last ordered, how long it has been, their recent order value, which days they accept deliveries and whether they need attention. If the caller gave a name instead of a key, run find_customer_by_name first. Do not use this for products or for a rep's own numbers.",
-      "subject": "Accounts",
+      "value_label": "rep being asked about",
+      "example": "Ken Tov",
+      "description": "How ONE REP is doing this month, by their name. Use for a rep asking about their own performance -- orders submitted, total and average order value, their biggest order, how many accounts ordered, where they are on pace to land by month end, and how that compares with last month. This is the rep's own numbers, not one account's: for a single store use lookup_account_status.",
+      "subject": "How am I doing?",
       "sample_questions": [
-        "How is RED005 doing?",
-        "When did RED005 last order?",
-        "Which days does RED005 take deliveries?"
+        "How am I doing this month?",
+        "How does that compare to last month?",
+        "Where will I land by month end?"
       ],
-      "answer_example": "Red Apple Market last ordered on the twenty-second, one day ago. Twenty-three orders recently, averaging about twenty-four thousand dollars."
+      "answer_example": "A hundred and fifty-six orders so far this month, about two million dollars, across seventy-seven accounts. At this pace you land near two point seven."
     },
     {
       "name": "lookup_account_invoiced",
@@ -175,7 +150,7 @@
       "value_label": "account key being asked about",
       "example": "RED005",
       "description": "What ONE account was actually INVOICED this month, and what came back as returns. Use for what a store really bought, their invoice value, how it compares with last month, and whether returns are running high. This is posted invoices, which is different from orders submitted -- for order activity and when they last ordered use lookup_account_status instead.",
-      "subject": "Accounts",
+      "subject": "How am I doing?",
       "sample_questions": [
         "What did Red Apple Market buy last month?",
         "How are returns looking for that account?"
@@ -204,7 +179,7 @@
       "value_label": "account key being asked about",
       "example": "RED005",
       "description": "What ONE account actually buys, item by item, most often first. Use for what a store orders, how often they take it, and when they last did. This is their purchase history -- for what to PITCH them next use lookup_pitch_list, which ranks by opportunity rather than by how often they have bought.",
-      "subject": "What an account buys",
+      "subject": "What should I sell them?",
       "sample_questions": [
         "What does Red Apple Market usually buy?",
         "What are their top items?"
@@ -235,110 +210,12 @@
       "value_label": "account key being asked about",
       "example": "RED005",
       "description": "What to walk in and TALK ABOUT with ONE account: items ranked by opportunity, each with the reason it made the list and the evidence behind it. Use when a rep asks what to sell, pitch, recommend or bring up with a store. Every row says whether it is evidence based -- built on that account's own buying -- or only a suggestion, and those two must be said differently.",
-      "subject": "What to pitch",
+      "subject": "What should I sell them?",
       "sample_questions": [
         "What should I sell Red Apple Market?",
         "What should I talk to them about?"
       ],
       "answer_example": "They are due for Soy Bean with Ginger Sauce, and Punjas Butter Snap Cookies are worth a mention. Want the detail on either?"
-    },
-    {
-      "name": "lookup_nearby_accounts",
-      "table": "ust_databricks.ust_reporting.mart_rep_nearby_accounts",
-      "lookup_column": "anchor_customer_key",
-      "match": "exact",
-      "columns": [
-        "nearby_customer_name",
-        "nearby_city",
-        "distance_km",
-        "attention_reason",
-        "days_since_last_order",
-        "order_value_recent",
-        "delivery_days"
-      ],
-      "order_by": "nearby_rank",
-      "limit": 6,
-      "value_label": "account key they are standing at",
-      "example": "RED005",
-      "description": "Other accounts NEAR a given account, closest and most urgent first, with how far away each is and why it needs attention. Use when a rep says they are at or near a store and asks who else is around, or who nearby has gone quiet. Needs the key of the account they are AT -- look the name up first if they gave one.",
-      "subject": "Who to call",
-      "sample_questions": [
-        "I'm at Red Apple Market, who else is nearby?",
-        "Who near here has gone quiet?"
-      ],
-      "answer_example": "Three within five kilometres. The closest that has gone quiet is a mile off and has not ordered in ninety days."
-    },
-    {
-      "name": "lookup_rep_month",
-      "table": "ust_databricks.ust_reporting.mart_rep_period_status",
-      "lookup_column": "rep_name",
-      "match": "contains",
-      "columns": [
-        "rep_name",
-        "period_start",
-        "as_of_date",
-        "days_elapsed",
-        "days_in_period",
-        "orders_submitted",
-        "order_value_total",
-        "order_value_avg",
-        "order_value_largest",
-        "accounts_ordered",
-        "order_value_projected",
-        "prev_order_value_total",
-        "order_value_change_pct"
-      ],
-      "filters": [
-        "period_type = 'month'",
-        "is_current"
-      ],
-      "limit": 1,
-      "value_label": "rep being asked about",
-      "example": "Ken Tov",
-      "description": "How ONE REP is doing this month, by their name. Use for a rep asking about their own performance -- orders submitted, total and average order value, their biggest order, how many accounts ordered, where they are on pace to land by month end, and how that compares with last month. This is the rep's own numbers, not one account's: for a single store use lookup_account_status.",
-      "subject": "My performance",
-      "sample_questions": [
-        "How am I doing this month?",
-        "How does that compare to last month?",
-        "Where will I land by month end?"
-      ],
-      "answer_example": "A hundred and fifty-six orders so far this month, about two million dollars, across seventy-seven accounts. At this pace you land near two point seven."
-    },
-    {
-      "name": "rank_accounts_to_call",
-      "kind": "rank",
-      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
-      "columns": [
-        "customer_name",
-        "city",
-        "rep_name",
-        "days_since_last_order",
-        "order_value_recent",
-        "attention_reason",
-        "delivery_days"
-      ],
-      "filters": [
-        "needs_attention",
-        "customer_is_active",
-        "days_since_last_order IS NOT NULL",
-        "days_since_last_order <= 365"
-      ],
-      "modes": {
-        "longest_since_order": "-days_since_last_order",
-        "biggest_accounts": "-order_value_all_time",
-        "most_urgent": "attention_priority"
-      },
-      "limit": 6,
-      "value_label": "ranking mode",
-      "example": "longest_since_order",
-      "description": "Accounts that need a call, across the book, limited to those seen within the last year so the list is actionable. Use when someone asks who to call, who has gone quiet, or which accounts need attention -- a group question, not one named store. Pass exactly one of: longest_since_order, biggest_accounts, most_urgent. Returns six accounts with why each was flagged. For one specific account use lookup_account_status; for accounts near where a rep is standing use lookup_nearby_accounts.",
-      "subject": "Who to call",
-      "sample_questions": [
-        "Who should I call today?",
-        "Which accounts have gone quiet?",
-        "Which of my biggest accounts need attention?"
-      ],
-      "answer_example": "Powell Butte Grocery in Portland has not ordered in a year, then Rabbit Kitchen in San Mateo. Both are flagged overdue."
     },
     {
       "name": "search_items",
@@ -366,7 +243,7 @@
       "value_label": "product being asked about",
       "example": "coconut milk",
       "description": "Find PRODUCTS by what they are called. Use when someone asks whether we carry something, what brands or sizes there are, or what is in stock, and they have named the product rather than given a part number. Send two or three plain English words. Returns the item number, price, stock and whether it is on promotion. Nothing to do with customers or accounts.",
-      "subject": "Products",
+      "subject": "What should I sell them?",
       "sample_questions": [
         "Do we carry coconut milk?",
         "What jasmine rice do we stock?",
@@ -400,12 +277,168 @@
       "value_label": "part number",
       "example": "11050",
       "description": "ONE product by its exact part number. Use when a caller reads out a number rather than a name. Returns stock on hand and shippable, price, case size, any live promotion and whether the item is discontinued. If they described the product in words instead, use search_items.",
-      "subject": "Products",
+      "subject": "What should I sell them?",
       "sample_questions": [
         "Is part 11050 in stock?",
         "What's the promo on 11050?"
       ],
       "answer_example": "Four thousand six hundred and eighty units of Golden Corn on Cob, as of last night."
+    },
+    {
+      "name": "find_customer_by_name",
+      "table": "ust_databricks.ust_dims.dim_customers",
+      "lookup_column": "customer_name",
+      "match": "all_words",
+      "columns": [
+        "customer_key",
+        "customer_name",
+        "city",
+        "post_code",
+        "owner_rep_name"
+      ],
+      "filters": [
+        "is_active",
+        "NOT is_test_account"
+      ],
+      "order_by": "customer_name",
+      "limit": 6,
+      "value_label": "store or account being asked about",
+      "example": "asian market",
+      "description": "Find a customer's account key from the name a caller said out loud. Use this FIRST whenever someone names a store rather than giving a key. Returns every active account matching those words with its city, post code and owning rep, because store names repeat -- many accounts share a name. Read the city and owner back and ask which one they mean before looking anything else up. Do not use this for products.",
+      "subject": "Who should I call?",
+      "sample_questions": [
+        "How is Asian Market doing?",
+        "Look up Lee's Sandwiches"
+      ],
+      "answer_example": "I found one Red Apple Market in Anchorage, owned by Tech Tov. Would you like their recent activity?"
+    },
+    {
+      "name": "lookup_account_status",
+      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
+      "lookup_column": "customer_key",
+      "match": "exact",
+      "columns": [
+        "customer_name",
+        "city",
+        "rep_name",
+        "last_order_date",
+        "days_since_last_order",
+        "orders_recent",
+        "order_value_recent",
+        "order_value_avg",
+        "orders_all_time",
+        "delivery_days",
+        "appointment_required",
+        "attention_reason",
+        "as_of_date"
+      ],
+      "order_by": "days_since_last_order",
+      "limit": 1,
+      "value_label": "customer key",
+      "example": "RED005",
+      "description": "How ONE account is doing, by its customer key. Use for how an account is performing, when they last ordered, how long it has been, their recent order value, which days they accept deliveries and whether they need attention. If the caller gave a name instead of a key, run find_customer_by_name first. Do not use this for products or for a rep's own numbers.",
+      "subject": "Who should I call?",
+      "sample_questions": [
+        "How is RED005 doing?",
+        "When did RED005 last order?",
+        "Which days does RED005 take deliveries?"
+      ],
+      "answer_example": "Red Apple Market last ordered on the twenty-second, one day ago. Twenty-three orders recently, averaging about twenty-four thousand dollars."
+    },
+    {
+      "name": "rank_accounts_to_call",
+      "kind": "rank",
+      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
+      "columns": [
+        "customer_name",
+        "city",
+        "rep_name",
+        "days_since_last_order",
+        "order_value_recent",
+        "attention_reason",
+        "delivery_days"
+      ],
+      "filters": [
+        "needs_attention",
+        "customer_is_active",
+        "days_since_last_order IS NOT NULL",
+        "days_since_last_order <= 365"
+      ],
+      "modes": {
+        "longest_since_order": "-days_since_last_order",
+        "biggest_accounts": "-order_value_all_time",
+        "most_urgent": "attention_priority"
+      },
+      "limit": 6,
+      "value_label": "ranking mode",
+      "example": "longest_since_order",
+      "description": "Accounts that need a call, across the book, limited to those seen within the last year so the list is actionable. Use when someone asks who to call, who has gone quiet, or which accounts need attention -- a group question, not one named store. Pass exactly one of: longest_since_order, biggest_accounts, most_urgent. Returns six accounts with why each was flagged. For one specific account use lookup_account_status; for accounts near where a rep is standing use lookup_nearby_accounts.",
+      "subject": "Who should I call?",
+      "sample_questions": [
+        "Who should I call today?",
+        "Which accounts have gone quiet?",
+        "Which of my biggest accounts need attention?"
+      ],
+      "answer_example": "Powell Butte Grocery in Portland has not ordered in a year, then Rabbit Kitchen in San Mateo. Both are flagged overdue."
+    },
+    {
+      "name": "lookup_nearby_accounts",
+      "table": "ust_databricks.ust_reporting.mart_rep_nearby_accounts",
+      "lookup_column": "anchor_customer_key",
+      "match": "exact",
+      "columns": [
+        "nearby_customer_name",
+        "nearby_city",
+        "distance_km",
+        "attention_reason",
+        "days_since_last_order",
+        "order_value_recent",
+        "delivery_days"
+      ],
+      "order_by": "nearby_rank",
+      "limit": 6,
+      "value_label": "account key they are standing at",
+      "example": "RED005",
+      "description": "Other accounts NEAR a given account, closest and most urgent first, with how far away each is and why it needs attention. Use when a rep says they are at or near a store and asks who else is around, or who nearby has gone quiet. Needs the key of the account they are AT -- look the name up first if they gave one.",
+      "subject": "Who should I call?",
+      "sample_questions": [
+        "I'm at Red Apple Market, who else is nearby?",
+        "Who near here has gone quiet?"
+      ],
+      "answer_example": "Three within five kilometres. The closest that has gone quiet is a mile off and has not ordered in ninety days."
     }
-  ]
+  ],
+  "tbd": {
+    "_comment": "Questions from the 9/8/2026 PDF that no built table answers. Shown in the web guide so a rep knows not to ask, rather than finding out mid-call. Each waits on a NAV table not yet exported to Databricks.",
+    "waiting_on": [
+      {
+        "table": "Salesperson Target",
+        "unlocks": [
+          "Will I hit my target this month?",
+          "How much more do I need for the rest of the month?",
+          "Am I ahead or behind for this point in the month?",
+          "How does this compare with the same month last year?"
+        ]
+      },
+      {
+        "table": "Customer Outstanding Balance",
+        "unlocks": [
+          "Which accounts are past their terms?",
+          "What are my average AR days?"
+        ]
+      },
+      {
+        "table": "Sales Person Margin History",
+        "unlocks": [
+          "What share of my sales is branded?"
+        ]
+      },
+      {
+        "table": "Salesperson_Purchaser",
+        "unlocks": [
+          "What AR, brand and margin targets am I measured against?"
+        ]
+      }
+    ]
+  }
 }

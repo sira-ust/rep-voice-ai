@@ -416,7 +416,15 @@ class Handler(BaseHTTPRequestHandler):
                 answer = spec.get("answer_example")
                 if answer and answer not in entry["answers"]:
                     entry["answers"].append(answer)
-            self._json(200, {"groups": [g for g in groups.values() if g["questions"]]})
+            # What the agent cannot answer yet, and what each is waiting on.
+            # Shown so a rep learns the limit from the page rather than from a
+            # question that fails halfway through a call.
+            tbd = []
+            for entry in ((config.get("tbd") or {}).get("waiting_on") or []):
+                for question in (entry.get("unlocks") or []):
+                    tbd.append({"question": question, "waitingOn": entry.get("table") or ""})
+            self._json(200, {"groups": [g for g in groups.values() if g["questions"]],
+                             "tbd": tbd})
             return
 
         if route == "/api/agents":

@@ -686,23 +686,23 @@ async function loadGuide() {
 
   const asks = document.createElement("div");
   asks.className = "guide-asks";
-  // One per topic, so the list shows the range of what can be asked rather
-  // than several ways of asking the same thing.
+  // Two per topic. One left three questions standing for three broad sections,
+  // which reads as a thin tool rather than a shorthand.
   for (const group of groups) {
-    const question = (group.questions || [])[0];
-    if (!question) continue;
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "guide-ask";
-    btn.textContent = question;
-    // Clicking loads it into the composer rather than sending, so the user
-    // can edit it and can see where their words go.
-    btn.addEventListener("click", () => {
-      el.composerInput.value = question;
-      if (!el.composerInput.disabled) el.composerInput.focus();
-      else el.modeLabel.textContent = "Start the conversation, then send it";
-    });
-    asks.appendChild(btn);
+    for (const question of (group.questions || []).slice(0, 2)) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "guide-ask";
+      btn.textContent = question;
+      // Clicking loads it into the composer rather than sending, so the user
+      // can edit it and can see where their words go.
+      btn.addEventListener("click", () => {
+        el.composerInput.value = question;
+        if (!el.composerInput.disabled) el.composerInput.focus();
+        else el.modeLabel.textContent = "Start the conversation, then send it";
+      });
+      asks.appendChild(btn);
+    }
   }
   asking.appendChild(asks);
 
@@ -717,13 +717,44 @@ async function loadGuide() {
   }
   el.guideGroups.appendChild(asking);
 
+  // Questions the PDF asks for that nothing can answer yet. Better read here
+  // than discovered mid-call: each one is a reasonable thing for a rep to want
+  // and will stay unanswerable until the table behind it lands.
+  const tbd = data.tbd || [];
+  if (tbd.length) {
+    const block = document.createElement("div");
+    block.className = "guide-group";
+    const label = document.createElement("span");
+    label.className = "guide-subject";
+    label.textContent = "TBD — not answerable yet";
+    block.appendChild(label);
+
+    const list = document.createElement("ul");
+    list.className = "guide-about";
+    for (const item of tbd) {
+      const li = document.createElement("li");
+      li.textContent = item.question;
+      if (item.waitingOn) li.title = "Waiting on " + item.waitingOn;
+      list.appendChild(li);
+    }
+    block.appendChild(list);
+
+    const waiting = [...new Set(tbd.map((t) => t.waitingOn).filter(Boolean))];
+    if (waiting.length) {
+      const note = document.createElement("p");
+      note.className = "guide-limit";
+      note.textContent = "Waiting on " + waiting.join(", ") + ".";
+      block.appendChild(note);
+    }
+    el.guideGroups.appendChild(block);
+  }
+
   if (el.guideFoot) {
     // The gaps worth knowing before you ask, in one line rather than one per
     // topic. Everything else about a topic is on its tooltip.
     el.guideFoot.textContent =
-      "No money owed, targets, margin or credit — those are not in the data. " +
-      `Everything else is read live from ${tables.length} table` +
-      `${tables.length === 1 ? "" : "s"}, never from memory.`;
+      `Read live from ${tables.length} table${tables.length === 1 ? "" : "s"} ` +
+      "each time you ask, never from memory.";
   }
 }
 
