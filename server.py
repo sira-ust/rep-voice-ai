@@ -394,8 +394,8 @@ class Handler(BaseHTTPRequestHandler):
             groups = {}
             for spec in (config.get("tools") or []):
                 subject = spec.get("subject") or "Data"
-                entry = groups.setdefault(subject, {"subject": subject,
-                                                    "tables": [], "questions": []})
+                entry = groups.setdefault(subject, {"subject": subject, "tables": [],
+                                                    "questions": [], "answers": []})
                 full = spec.get("table") or ""
                 if full and not any(t["name"] == full.split(".")[-1]
                                     for t in entry["tables"]):
@@ -410,6 +410,12 @@ class Handler(BaseHTTPRequestHandler):
                 for question in (spec.get("sample_questions") or []):
                     if question not in entry["questions"]:
                         entry["questions"].append(question)
+                # One worked example per subject. Knowing what an answer sounds
+                # like is most of knowing whether to ask -- a caller who expects
+                # a spreadsheet and hears two sentences assumes it failed.
+                answer = spec.get("answer_example")
+                if answer and answer not in entry["answers"]:
+                    entry["answers"].append(answer)
             self._json(200, {"groups": [g for g in groups.values() if g["questions"]]})
             return
 

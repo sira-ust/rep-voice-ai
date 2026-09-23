@@ -659,26 +659,33 @@ async function loadGuide() {
       const tag = document.createElement("span");
       tag.className = "guide-table";
       tag.textContent = table.name;
-      if (table.grain) tag.title = table.grain;
+      tag.title = [table.label, table.about, table.grain,
+                   table.notCovered && "Not in this data: " + table.notCovered]
+        .filter(Boolean).join("\n\n");
       head.appendChild(tag);
       if (!tables.includes(table.name)) tables.push(table.name);
     }
     node.appendChild(head);
 
-    for (const table of group.tables || []) {
-      if (!table.about) continue;
+    // One description and one caveat per subject, not one per table. A subject
+    // can read three tables, and printing all six paragraphs pushed the
+    // questions -- the thing this page exists to show -- below the fold. The
+    // full detail is still there on each table tag's tooltip.
+    const described = (group.tables || []).filter((t) => t.about);
+    if (described.length) {
       const about = document.createElement("p");
       about.className = "guide-about";
-      about.textContent = table.about;
+      about.textContent = described[0].about;
       node.appendChild(about);
-      // Saying what the data cannot answer prevents the most frustrating
-      // failure: a reasonable question that can never work.
-      if (table.notCovered) {
-        const limit = document.createElement("p");
-        limit.className = "guide-limit";
-        limit.textContent = "Not in this data: " + table.notCovered;
-        node.appendChild(limit);
-      }
+    }
+    // Saying what the data cannot answer prevents the most frustrating
+    // failure: a reasonable question that can never work.
+    const limited = (group.tables || []).find((t) => t.notCovered);
+    if (limited) {
+      const limit = document.createElement("p");
+      limit.className = "guide-limit";
+      limit.textContent = "Not in this data: " + limited.notCovered;
+      node.appendChild(limit);
     }
 
     const asks = document.createElement("div");
@@ -698,6 +705,20 @@ async function loadGuide() {
       asks.appendChild(btn);
     }
     node.appendChild(asks);
+
+    // What an answer sounds like. Spoken answers are two or three sentences,
+    // and someone expecting a table reads that as the lookup having failed --
+    // so show the shape of a reply next to the questions that produce it.
+    // Reuses .guide-limit, whose rule already sets an aside off with a left
+    // border, rather than introducing a class the stylesheet does not define.
+    const answer = (group.answers || [])[0];
+    if (answer) {
+      const reply = document.createElement("p");
+      reply.className = "guide-limit";
+      reply.textContent = "Answers like: \u201c" + answer + "\u201d";
+      node.appendChild(reply);
+    }
+
     el.guideGroups.appendChild(node);
   }
 

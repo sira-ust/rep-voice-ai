@@ -111,7 +111,8 @@
       "sample_questions": [
         "How is Asian Market doing?",
         "Look up Lee's Sandwiches"
-      ]
+      ],
+      "answer_example": "I found one Red Apple Market in Anchorage, owned by Tech Tov. Would you like their recent activity?"
     },
     {
       "name": "lookup_account_status",
@@ -143,7 +144,8 @@
         "How is RED005 doing?",
         "When did RED005 last order?",
         "Which days does RED005 take deliveries?"
-      ]
+      ],
+      "answer_example": "Red Apple Market last ordered on the twenty-second, one day ago. Twenty-three orders recently, averaging about twenty-four thousand dollars."
     },
     {
       "name": "lookup_account_invoiced",
@@ -177,7 +179,8 @@
       "sample_questions": [
         "What did Red Apple Market buy last month?",
         "How are returns looking for that account?"
-      ]
+      ],
+      "answer_example": "Five invoices this month. Only part of that is priced in our data, so I can give you the count with confidence but not the full value."
     },
     {
       "name": "lookup_account_top_items",
@@ -205,7 +208,8 @@
       "sample_questions": [
         "What does Red Apple Market usually buy?",
         "What are their top items?"
-      ]
+      ],
+      "answer_example": "They buy KYJ Pork Sausage most often — five hundred and ninety-five times, last on the eleventh of August."
     },
     {
       "name": "lookup_pitch_list",
@@ -235,7 +239,8 @@
       "sample_questions": [
         "What should I sell Red Apple Market?",
         "What should I talk to them about?"
-      ]
+      ],
+      "answer_example": "They are due for Soy Bean with Ginger Sauce, and Punjas Butter Snap Cookies are worth a mention. Want the detail on either?"
     },
     {
       "name": "lookup_nearby_accounts",
@@ -260,7 +265,8 @@
       "sample_questions": [
         "I'm at Red Apple Market, who else is nearby?",
         "Who near here has gone quiet?"
-      ]
+      ],
+      "answer_example": "Three within five kilometres. The closest that has gone quiet is a mile off and has not ordered in ninety days."
     },
     {
       "name": "lookup_rep_month",
@@ -295,7 +301,8 @@
         "How am I doing this month?",
         "How does that compare to last month?",
         "Where will I land by month end?"
-      ]
+      ],
+      "answer_example": "A hundred and fifty-six orders so far this month, about two million dollars, across seventy-seven accounts. At this pace you land near two point seven."
     },
     {
       "name": "rank_accounts_to_call",
@@ -330,7 +337,8 @@
         "Who should I call today?",
         "Which accounts have gone quiet?",
         "Which of my biggest accounts need attention?"
-      ]
+      ],
+      "answer_example": "Powell Butte Grocery in Portland has not ordered in a year, then Rabbit Kitchen in San Mateo. Both are flagged overdue."
     },
     {
       "name": "search_items",
@@ -363,7 +371,8 @@
         "Do we carry coconut milk?",
         "What jasmine rice do we stock?",
         "Anything on promotion in oyster sauce?"
-      ]
+      ],
+      "answer_example": "Several — DF Coconut Milk, Aroy D and Chaokoh. Want stock on one of them?"
     },
     {
       "name": "lookup_item",
@@ -395,7 +404,8 @@
       "sample_questions": [
         "Is part 11050 in stock?",
         "What's the promo on 11050?"
-      ]
+      ],
+      "answer_example": "Four thousand six hundred and eighty units of Golden Corn on Cob, as of last night."
     }
   ]
 }
