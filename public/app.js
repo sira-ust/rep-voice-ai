@@ -649,48 +649,32 @@ async function loadGuide() {
     const node = document.createElement("div");
     node.className = "guide-group";
 
+    // Topic and questions only. The table names, what each one holds and what
+    // it cannot answer were accurate and nobody read them: six subjects' worth
+    // of that pushed the questions off the screen they are the point of. The
+    // detail still reaches anyone who wants it, on the topic's tooltip.
     const head = document.createElement("div");
     head.className = "guide-head";
     const subject = document.createElement("span");
     subject.className = "guide-subject";
     subject.textContent = group.subject;
-    head.appendChild(subject);
-    for (const table of group.tables || []) {
-      const tag = document.createElement("span");
-      tag.className = "guide-table";
-      tag.textContent = table.name;
-      tag.title = [table.label, table.about, table.grain,
-                   table.notCovered && "Not in this data: " + table.notCovered]
-        .filter(Boolean).join("\n\n");
-      head.appendChild(tag);
-      if (!tables.includes(table.name)) tables.push(table.name);
-    }
-    node.appendChild(head);
+    subject.title = (group.tables || [])
+      .map((t) => [t.label || t.name, t.about,
+                   t.notCovered && "Not in this data: " + t.notCovered]
+        .filter(Boolean).join("
+"))
+      .join("
 
-    // One description and one caveat per subject, not one per table. A subject
-    // can read three tables, and printing all six paragraphs pushed the
-    // questions -- the thing this page exists to show -- below the fold. The
-    // full detail is still there on each table tag's tooltip.
-    const described = (group.tables || []).filter((t) => t.about);
-    if (described.length) {
-      const about = document.createElement("p");
-      about.className = "guide-about";
-      about.textContent = described[0].about;
-      node.appendChild(about);
-    }
-    // Saying what the data cannot answer prevents the most frustrating
-    // failure: a reasonable question that can never work.
-    const limited = (group.tables || []).find((t) => t.notCovered);
-    if (limited) {
-      const limit = document.createElement("p");
-      limit.className = "guide-limit";
-      limit.textContent = "Not in this data: " + limited.notCovered;
-      node.appendChild(limit);
+");
+    head.appendChild(subject);
+    node.appendChild(head);
+    for (const table of group.tables || []) {
+      if (!tables.includes(table.name)) tables.push(table.name);
     }
 
     const asks = document.createElement("div");
     asks.className = "guide-asks";
-    for (const question of group.questions || []) {
+    for (const question of (group.questions || []).slice(0, 4)) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "guide-ask";
@@ -723,9 +707,12 @@ async function loadGuide() {
   }
 
   if (el.guideFoot) {
+    // The gaps worth knowing before you ask, in one line rather than one per
+    // topic. Everything else about a topic is on its tooltip.
     el.guideFoot.textContent =
-      `Reading ${tables.length} table${tables.length === 1 ? "" : "s"} live. ` +
-      "Figures come from a lookup each time, never from memory.";
+      "No money owed, targets, margin or credit — those are not in the data. " +
+      `Everything else is read live from ${tables.length} table` +
+      `${tables.length === 1 ? "" : "s"}, never from memory.`;
   }
 }
 
