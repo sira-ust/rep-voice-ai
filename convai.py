@@ -123,7 +123,7 @@ class WebSocketClient:
 
 
 def converse(messages: list[str], quiet: float = 10.0, cap: float = 75.0,
-             on_agent=None, on_user=None) -> dict:
+             on_agent=None, on_user=None, rep: str = "") -> dict:
     """Say each message in turn, waiting for the agent to finish between them.
 
     Turn boundaries come from silence, not from counting replies. A tool-calling
@@ -140,6 +140,11 @@ def converse(messages: list[str], quiet: float = 10.0, cap: float = 75.0,
     ws.send(json.dumps({
         "type": "conversation_initiation_client_data",
         "conversation_config_override": {"conversation": {"text_only": True}},
+        # The prompt reads {{rep_name}}, and a referenced variable with nothing
+        # behind it fails the session rather than resolving to blank. The web
+        # page sends whoever is picked; here "All" is the honest default, and
+        # callers who are testing a rep's own numbers say so in the message.
+        "dynamic_variables": {"rep_name": rep or "All"},
     }))
 
     result = {"conversation_id": None, "opener": None, "replies": [], "error": None}

@@ -120,6 +120,53 @@ def warm_warehouse(reason: str) -> None:
     threading.Thread(target=run, daemon=True, name="dbx-warm").start()
 
 
+# The rep list for the picker. Cached, because it changes about as often as
+# somebody joins the company and every sign-in would otherwise wake the
+# warehouse. Uses the warm-up token, which is the only Databricks credential
+# this server holds and is read-only; the agent's own lookups go from
+# ElevenLabs straight to Databricks and never through here.
+_reps_cache: list = []
+_reps_fetched = 0.0
+_reps_lock = threading.Lock()
+REPS_TTL = 15 * 60
+
+
+def sales_reps() -> list:
+    """Active reps who own accounts, newest list at most REPS_TTL old."""
+    global _reps_cache, _reps_fetched
+    if not WARM_READY:
+        return []
+    with _reps_lock:
+        if _reps_cache and time.time() - _reps_fetched < REPS_TTL:
+            return _reps_cache
+    body = json.dumps({
+        "warehouse_id": DBX_WAREHOUSE,
+        "statement": ("SELECT sales_code, rep_name FROM ust_databricks.ust_dims.dim_reps "
+                      "WHERE is_active AND owns_accounts AND rep_name IS NOT NULL "
+                      "ORDER BY rep_name"),
+        "wait_timeout": "30s",
+        "on_wait_timeout": "CANCEL",
+        "disposition": "INLINE",
+        "format": "JSON_ARRAY",
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        DBX_HOST + "/api/2.0/sql/statements/", data=body, method="POST",
+        headers={"Authorization": "Bearer " + DBX_WARM_TOKEN,
+                 "Content-Type": "application/json",
+                 "User-Agent": "Mozilla/5.0 (compatible) elevenlabs-webui/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=35) as resp:
+            data = json.loads(resp.read().decode("utf-8") or "{}")
+        rows = ((data.get("result") or {}).get("data_array")) or []
+        reps = [{"code": r[0], "name": r[1]} for r in rows if len(r) > 1 and r[1]]
+    except Exception as exc:  # noqa: BLE001 - the picker degrades to "All"
+        sys.stderr.write("  REPS lookup failed: %s\n" % exc)
+        return _reps_cache
+    with _reps_lock:
+        _reps_cache, _reps_fetched = reps, time.time()
+    return reps
+
+
 CSP = os.environ.get("APP_CSP", "on").strip().lower() not in ("off", "0", "false")
 
 # Behind a reverse proxy, X-Forwarded-For is the real client. Off by default:
@@ -382,6 +429,11 @@ class Handler(BaseHTTPRequestHandler):
                 "hasApiKey": bool(API_KEY),
                 "user": self._user(),
             })
+            return
+
+        if route == "/api/reps":
+            # Who the caller can claim to be, until real sign-in exists.
+            self._json(200, {"reps": sales_reps()})
             return
 
         if route == "/api/capabilities":

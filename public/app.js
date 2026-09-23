@@ -23,6 +23,8 @@ const el = {
   llmNote: $("llmNote"),
   orb: $("orb"),
   modeLabel: $("modeLabel"),
+  repField: $("repField"),
+  repSelect: $("repSelect"),
   callBtn: $("callBtn"),
   callBtnLabel: $("callBtnLabel"),
   muteBtn: $("muteBtn"),
@@ -220,6 +222,10 @@ function render() {
   const busy = status === "connecting" || status === "disconnecting";
   el.callBtn.classList.toggle("is-live", live);
   el.callBtn.disabled = busy;
+  // Locked for the duration of a call. The agent is told who it is speaking to
+  // once, at the start, so changing it mid-conversation would leave the picker
+  // and every answer disagreeing about whose accounts these are.
+  if (el.repSelect) el.repSelect.disabled = live || busy;
   el.callBtnLabel.textContent = live
     ? "End conversation"
     : busy
@@ -380,10 +386,18 @@ async function startConversation() {
     const auth = await getAuth(agentId, connectionType);
     log("out", "auth ok", connectionType === "websocket" ? "signedUrl" : "conversationToken");
 
+    // Who the agent takes the caller to be. The prompt reads {{rep_name}},
+    // so this must always be sent -- a referenced variable with nothing behind
+    // it fails the whole session, and "All" is a real answer here rather than
+    // a missing one.
+    const rep = el.repSelect ? el.repSelect.value : "";
+    log("out", "signed in as", rep || "All reps");
+
     state.conversation = await Conversation.startSession({
       ...auth,
       connectionType,
       textOnly: false,
+      dynamicVariables: { rep_name: rep || "All" },
 
       onConnect: ({ conversationId }) => {
         log("cb", "onConnect", conversationId);
@@ -632,6 +646,41 @@ window.addEventListener("beforeunload", () => {
 });
 
 /** Render the "what can I ask" guide from the tools actually wired up. */
+/** Fill the rep picker. Failure leaves the single "All reps" option, which
+ *  still works -- the agent simply has to ask who it is speaking to. */
+async function loadReps() {
+  if (!el.repSelect) return;
+  let data;
+  try {
+    data = await getJSON("/api/reps");
+  } catch {
+    return;
+  }
+  for (const rep of data.reps || []) {
+    const option = document.createElement("option");
+    option.value = rep.name;
+    option.textContent = rep.code ? `${rep.name} (${rep.code})` : rep.name;
+    el.repSelect.appendChild(option);
+  }
+  // Survives a reload, so a rep testing a few questions is not re-picking
+  // themselves every time.
+  try {
+    const saved = localStorage.getItem("convai.rep");
+    if (saved && [...el.repSelect.options].some((o) => o.value === saved)) {
+      el.repSelect.value = saved;
+    }
+  } catch {
+    // Storage blocked; the default is fine.
+  }
+  el.repSelect.addEventListener("change", () => {
+    try {
+      localStorage.setItem("convai.rep", el.repSelect.value);
+    } catch {
+      // Not persisting is not worth telling anyone about.
+    }
+  });
+}
+
 async function loadGuide() {
   let data;
   try {
@@ -837,6 +886,7 @@ async function init() {
   state.ready = Boolean(state.config.hasApiKey && el.agentIdInput.value);
   render();
   refreshAgentInfo();
+  loadReps();
   loadGuide();
 }
 
