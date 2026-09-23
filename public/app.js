@@ -644,67 +644,78 @@ async function loadGuide() {
 
   el.guideGroups.innerHTML = "";
   const tables = [];
-
   for (const group of groups) {
-    const node = document.createElement("div");
-    node.className = "guide-group";
-
-    // Topic and questions only. The table names, what each one holds and what
-    // it cannot answer were accurate and nobody read them: six subjects' worth
-    // of that pushed the questions off the screen they are the point of. The
-    // detail still reaches anyone who wants it, on the topic's tooltip.
-    const head = document.createElement("div");
-    head.className = "guide-head";
-    const subject = document.createElement("span");
-    subject.className = "guide-subject";
-    subject.textContent = group.subject;
-    subject.title = (group.tables || [])
-      .map((t) => [t.label || t.name, t.about,
-                   t.notCovered && "Not in this data: " + t.notCovered]
-        .filter(Boolean).join("
-"))
-      .join("
-
-");
-    head.appendChild(subject);
-    node.appendChild(head);
     for (const table of group.tables || []) {
       if (!tables.includes(table.name)) tables.push(table.name);
     }
-
-    const asks = document.createElement("div");
-    asks.className = "guide-asks";
-    for (const question of (group.questions || []).slice(0, 4)) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "guide-ask";
-      btn.textContent = question;
-      // Clicking loads it into the composer rather than sending, so the user
-      // can edit it and can see where their words go.
-      btn.addEventListener("click", () => {
-        el.composerInput.value = question;
-        if (!el.composerInput.disabled) el.composerInput.focus();
-        else el.modeLabel.textContent = "Start the conversation, then send it";
-      });
-      asks.appendChild(btn);
-    }
-    node.appendChild(asks);
-
-    // What an answer sounds like. Spoken answers are two or three sentences,
-    // and someone expecting a table reads that as the lookup having failed --
-    // so show the shape of a reply next to the questions that produce it.
-    // Reuses .guide-limit, whose rule already sets an aside off with a left
-    // border, rather than introducing a class the stylesheet does not define.
-    const answer = (group.answers || [])[0];
-    if (answer) {
-      const reply = document.createElement("p");
-      reply.className = "guide-limit";
-      reply.textContent = "Answers like: \u201c" + answer + "\u201d";
-      node.appendChild(reply);
-    }
-
-    el.guideGroups.appendChild(node);
   }
+
+  // Two lists: what it knows about, then what asking looks like. Earlier this
+  // was a block per topic carrying its own tables, description and caveats,
+  // which was six of everything on the one screen meant to get someone talking.
+  const topics = document.createElement("div");
+  topics.className = "guide-group";
+  const topicsLabel = document.createElement("span");
+  topicsLabel.className = "guide-subject";
+  topicsLabel.textContent = "Topics";
+  topics.appendChild(topicsLabel);
+
+  const topicList = document.createElement("ul");
+  topicList.className = "guide-about";
+  for (const group of groups) {
+    const li = document.createElement("li");
+    li.textContent = group.subject;
+    // The tables behind a topic, what they hold and what they cannot answer:
+    // there for anyone who wants it, costing nothing to anyone who does not.
+    li.title = (group.tables || [])
+      .map((t) => [t.label || t.name, t.about,
+                   t.notCovered && "Not in this data: " + t.notCovered]
+        .filter(Boolean).join("\n"))
+      .join("\n\n");
+    topicList.appendChild(li);
+  }
+  topics.appendChild(topicList);
+  el.guideGroups.appendChild(topics);
+
+  const asking = document.createElement("div");
+  asking.className = "guide-group";
+  const askingLabel = document.createElement("span");
+  askingLabel.className = "guide-subject";
+  askingLabel.textContent = "Types of questions";
+  asking.appendChild(askingLabel);
+
+  const asks = document.createElement("div");
+  asks.className = "guide-asks";
+  // One per topic, so the list shows the range of what can be asked rather
+  // than several ways of asking the same thing.
+  for (const group of groups) {
+    const question = (group.questions || [])[0];
+    if (!question) continue;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "guide-ask";
+    btn.textContent = question;
+    // Clicking loads it into the composer rather than sending, so the user
+    // can edit it and can see where their words go.
+    btn.addEventListener("click", () => {
+      el.composerInput.value = question;
+      if (!el.composerInput.disabled) el.composerInput.focus();
+      else el.modeLabel.textContent = "Start the conversation, then send it";
+    });
+    asks.appendChild(btn);
+  }
+  asking.appendChild(asks);
+
+  // What an answer sounds like, once. Spoken answers are a sentence or two,
+  // and someone expecting a table reads that as the lookup having failed.
+  const example = groups.map((g) => (g.answers || [])[0]).find(Boolean);
+  if (example) {
+    const reply = document.createElement("p");
+    reply.className = "guide-limit";
+    reply.textContent = "Answers like: \u201c" + example + "\u201d";
+    asking.appendChild(reply);
+  }
+  el.guideGroups.appendChild(asking);
 
   if (el.guideFoot) {
     // The gaps worth knowing before you ask, in one line rather than one per
