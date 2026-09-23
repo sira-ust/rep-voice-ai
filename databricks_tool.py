@@ -135,7 +135,11 @@ def statement(spec: dict) -> str:
     """
     columns = spec.get("columns") or []
     select = ", ".join(columns) if columns else "*"
-    table = spec["table"]
+    # `from` lets a spec join -- the biggest-order question needs the customer's
+    # name, which lives in a different table from the order. `table` stays the
+    # one this tool is about, so the drift check and the web guide still have a
+    # single table to point at.
+    table = spec.get("from") or spec["table"]
 
     # kind "rank": the model picks a named mode from an enum instead of supplying
     # a search value. The mode selects which column to order by, through a CASE
@@ -153,7 +157,8 @@ def statement(spec: dict) -> str:
         where = list(spec.get("filters") or [])
         period = spec.get("latest_week_column")
         if period:
-            where.append("%s = (SELECT MAX(%s) FROM %s)" % (period, period, table))
+            where.append("%s = (SELECT MAX(%s) FROM %s)"
+                         % (period, period, spec["table"]))
         sql = "SELECT %s FROM %s" % (select, table)
         if where:
             sql += " WHERE " + " AND ".join(where)
@@ -182,7 +187,8 @@ def statement(spec: dict) -> str:
 
     period = spec.get("latest_week_column")
     if period:
-        where.append("%s = (SELECT MAX(%s) FROM %s)" % (period, period, table))
+        where.append("%s = (SELECT MAX(%s) FROM %s)"
+                     % (period, period, spec["table"]))
     where.extend(spec.get("filters") or [])
 
     sql = "SELECT %s FROM %s WHERE %s" % (select, table, " AND ".join(where))

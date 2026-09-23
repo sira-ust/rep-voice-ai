@@ -83,6 +83,12 @@
       "about": "For an account a rep is standing at, the nearby accounts within a few kilometres, ranked by urgency then distance, with why each needs attention.",
       "grain": "per anchor account, straight-line distance",
       "not_covered": "Only accounts with coordinates appear, and distance is straight-line rather than driving. An isolated account will have no neighbours at all, which is not a failure."
+    },
+    "ust_databricks.ust_facts.fct_orders": {
+      "label": "Orders as submitted",
+      "about": "Every order a rep submitted through the app: the account it was for, its value, how many items were on it, which channel it came through and the day it went in.",
+      "grain": "one row per order, same day",
+      "not_covered": "Only orders placed through the app. An account that phones or emails its orders does not appear here, and these are orders as submitted rather than what was finally invoiced, so they will not tie out with invoice figures."
     }
   },
   "tools": [
@@ -92,19 +98,15 @@
       "lookup_column": "rep_name",
       "match": "contains",
       "columns": [
-        "rep_name",
-        "period_start",
-        "as_of_date",
-        "days_elapsed",
-        "days_in_period",
         "orders_submitted",
         "order_value_total",
         "order_value_avg",
-        "order_value_largest",
         "accounts_ordered",
+        "order_value_largest",
         "order_value_projected",
         "prev_order_value_total",
-        "order_value_change_pct"
+        "order_value_change_pct",
+        "as_of_date"
       ],
       "filters": [
         "period_type = 'month'",
@@ -121,6 +123,35 @@
         "Where will I land by month end?"
       ],
       "answer_example": "A hundred and fifty-six orders so far this month, about two million dollars, across seventy-seven accounts. At this pace you land near two point seven."
+    },
+    {
+      "name": "lookup_biggest_orders",
+      "table": "ust_databricks.ust_facts.fct_orders",
+      "from": "ust_databricks.ust_facts.fct_orders o JOIN ust_databricks.ust_dims.dim_customers c ON o.customer_key = c.customer_key JOIN ust_databricks.ust_dims.dim_reps r ON o.sales_code = r.sales_code",
+      "lookup_column": "r.rep_name",
+      "match": "contains",
+      "columns": [
+        "c.customer_name",
+        "c.city",
+        "o.grand_total",
+        "o.total_item_count",
+        "o.order_channel",
+        "o.submitted_date"
+      ],
+      "filters": [
+        "o.submitted_date >= date_trunc('month', current_date())"
+      ],
+      "order_by": "o.grand_total DESC",
+      "limit": 5,
+      "value_label": "rep whose orders to list",
+      "example": "Ryan Tran",
+      "description": "ONE REP's biggest orders this month, largest first, each WITH THE CUSTOMER that placed it, how many items were on it, which channel it came through and the date. Use when a rep asks about their biggest or largest order, who it was from, or how their orders split across channels. Requires the rep's name. For their month as a whole -- totals, averages, pace -- use lookup_rep_month.",
+      "subject": "How am I doing?",
+      "sample_questions": [
+        "What is my largest order and which customer?",
+        "Which of my orders came through the app?"
+      ],
+      "answer_example": "Your biggest was fifty nine thousand three hundred and thirty four dollars, from Asian Food Store in Appleton, four hundred and ninety seven items, through the PDA on the second."
     },
     {
       "name": "lookup_account_invoiced",
