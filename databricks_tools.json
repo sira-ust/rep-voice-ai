@@ -89,6 +89,12 @@
       "about": "Every order a rep submitted through the app: the account it was for, its value, how many items were on it, which channel it came through and the day it went in.",
       "grain": "one row per order, same day",
       "not_covered": "Only orders placed through the app. An account that phones or emails its orders does not appear here, and these are orders as submitted rather than what was finally invoiced, so they will not tie out with invoice figures."
+    },
+    "ust_databricks.ust_reporting.mart_rep_period_item_mix": {
+      "label": "What a month was made of",
+      "about": "A rep's invoiced month broken down: lines, distinct items and categories, the share that were promotional or new items, and the rate at which lines came back.",
+      "grain": "current month per rep, stamped with the day it was built",
+      "not_covered": "Share of lines is sound; share of value rests on the same late-2026 pricing gap as everything else, and across the reps only about fifteen percent of lines are priced, so read the coverage figure before quoting a value share. There is no branded share here -- that needs a table that has not landed."
     }
   },
   "tools": [
@@ -152,6 +158,35 @@
         "Which of my orders came through the app?"
       ],
       "answer_example": "Your biggest was fifty nine thousand three hundred and thirty four dollars, from Asian Food Store in Appleton, four hundred and ninety seven items, through the PDA on the second."
+    },
+    {
+      "name": "lookup_rep_month_mix",
+      "table": "ust_databricks.ust_reporting.mart_rep_period_item_mix",
+      "lookup_column": "rep_name",
+      "match": "contains",
+      "columns": [
+        "invoice_lines",
+        "distinct_items",
+        "distinct_categories",
+        "promo_line_share",
+        "new_item_line_share",
+        "return_line_rate",
+        "as_of_date"
+      ],
+      "filters": [
+        "period_type = 'month'",
+        "is_current"
+      ],
+      "limit": 1,
+      "value_label": "rep whose mix to break down",
+      "example": "Ryan Tran",
+      "description": "What ONE REP's month was MADE OF: how many invoice lines and distinct items and categories, and the share of LINES that were promotional or new items, plus the rate at which lines came back. Shares here are by line, not by value -- too little of the invoice history carries a price for a value share to mean anything, so if someone asks for the split by value, say it is by line and that value coverage is too thin to divide up. These are invoiced lines, not orders submitted: for order counts, totals and pace use lookup_rep_month, and for individual orders use lookup_biggest_orders.",
+      "subject": "How am I doing?",
+      "sample_questions": [
+        "What was my month made of?",
+        "How much of my month was promo or new items?"
+      ],
+      "answer_example": "Two thousand and ninety-eight lines across thirteen hundred items and ten categories. Promotions were about four percent of lines, new items about six."
     },
     {
       "name": "lookup_account_invoiced",

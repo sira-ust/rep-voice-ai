@@ -81,6 +81,18 @@
 
       <p class="mode-label" id="modeLabel">Tap to start talking</p>
 
+      <!-- Who the agent should take the caller to be. A stand-in for sign-in:
+           the rep-scoped lookups need a name, and until accounts exist the
+           caller picks one. Locked once the call starts, because changing who
+           you are mid-conversation would silently re-scope every answer. -->
+      <div class="field" id="repField">
+        <label for="repSelect">Signed in as</label>
+        <select id="repSelect">
+          <option value="">All reps (manager view)</option>
+        </select>
+        <p class="note" id="repNote" hidden></p>
+      </div>
+
       <button class="btn btn-primary" id="callBtn">
         <svg class="mic-icon" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
           <rect x="9" y="2" width="6" height="11" rx="3"/>
