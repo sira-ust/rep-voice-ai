@@ -27,11 +27,12 @@ ENV_FILE = ROOT / ".env"
 def _utf8_console() -> None:
     """Let these scripts print non-ASCII on a Windows console.
 
-    A Windows terminal hands Python cp1252, which cannot encode most of what
-    comes back from these tables: printing one such character raises
-    UnicodeEncodeError and takes the whole script down. Store names carry
-    accents and punctuation from the source system, so a lookup that returns
-    the wrong account is not the worst case -- a crash mid-listing is.
+    A Windows terminal hands Python cp1252, which cannot encode much of what
+    these scripts print: a Chinese reply from the agent, or the accents and
+    punctuation store names carry out of the source system. Printing one such
+    character raises UnicodeEncodeError and takes the whole script down, so a
+    lookup returning the wrong account is not the worst case -- a crash
+    mid-listing is.
 
     errors="replace" so an unexpected glyph degrades to a question mark
     instead of ending the run.

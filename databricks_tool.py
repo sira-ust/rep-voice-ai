@@ -332,8 +332,24 @@ def cmd_bench(spec: dict, value: str, runs: int = 3) -> None:
 # ------------------------------------------------------------------ elevenlabs wiring
 
 def ensure_secret() -> str:
-    """Store 'Bearer <token>' as a workspace secret; header values take it whole."""
+    """Store 'Bearer <token>' as a workspace secret; header values take it whole.
+
+    The token is proved against Databricks first. This is the one credential
+    that leaves the machine, and once it is at ElevenLabs the only sign it is
+    wrong is every lookup failing mid-call -- nothing here would have said so.
+    The way it goes wrong is specific: a stale DATABRICKS_TOKEN left in a shell
+    overrides .env by design, so a sync run after pasting a fresh token into
+    the file can quietly publish the dead one it replaced.
+    """
     need(DATABRICKS_TOKEN=DBX_TOKEN)
+    try:
+        run_adhoc("SELECT 1")
+    except Fail as exc:
+        raise Fail(
+            "The Databricks token does not work, so it was not sent to "
+            "ElevenLabs.\n    %s\n"
+            "    Check which value is in force -- a shell variable overrides "
+            ".env:\n      python common.py --check" % exc) from exc
     value = "Bearer " + DBX_TOKEN
     existing = elevenlabs("/convai/secrets").get("secrets", [])
     match = next((s for s in existing if s.get("name") == SECRET_NAME), None)
