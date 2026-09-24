@@ -25,6 +25,7 @@ const el = {
   modeLabel: $("modeLabel"),
   repField: $("repField"),
   repSelect: $("repSelect"),
+  repNote: $("repNote"),
   callBtn: $("callBtn"),
   callBtnLabel: $("callBtnLabel"),
   muteBtn: $("muteBtn"),
@@ -646,6 +647,12 @@ window.addEventListener("beforeunload", () => {
 });
 
 /** Render the "what can I ask" guide from the tools actually wired up. */
+function showRepNote(text) {
+  if (!el.repNote) return;
+  el.repNote.textContent = text;
+  el.repNote.hidden = false;
+}
+
 /** Fill the rep picker. Failure leaves the single "All reps" option, which
  *  still works -- the agent simply has to ask who it is speaking to. */
 async function loadReps() {
@@ -653,8 +660,15 @@ async function loadReps() {
   let data;
   try {
     data = await getJSON("/api/reps");
-  } catch {
+  } catch (err) {
+    showRepNote("Could not load the rep list: " + (err.message || err));
     return;
+  }
+  // An empty picker and a failed lookup look the same from the outside, and
+  // the person who can fix it is the one staring at the page.
+  if (!(data.reps || []).length) {
+    showRepNote("Rep list unavailable" + (data.error ? " — " + data.error : "") +
+                ". Ask as a manager, or name the rep in your question.");
   }
   for (const rep of data.reps || []) {
     const option = document.createElement("option");

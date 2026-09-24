@@ -126,6 +126,7 @@ def warm_warehouse(reason: str) -> None:
 # this server holds and is read-only; the agent's own lookups go from
 # ElevenLabs straight to Databricks and never through here.
 _reps_cache: list = []
+_reps_error = ""
 _reps_fetched = 0.0
 _reps_lock = threading.Lock()
 REPS_TTL = 15 * 60
@@ -160,8 +161,11 @@ def sales_reps() -> list:
         rows = ((data.get("result") or {}).get("data_array")) or []
         reps = [{"code": r[0], "name": r[1]} for r in rows if len(r) > 1 and r[1]]
     except Exception as exc:  # noqa: BLE001 - the picker degrades to "All"
+        global _reps_error
+        _reps_error = str(exc)
         sys.stderr.write("  REPS lookup failed: %s\n" % exc)
         return _reps_cache
+    _reps_error = ""
     with _reps_lock:
         _reps_cache, _reps_fetched = reps, time.time()
     return reps
@@ -432,8 +436,17 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if route == "/api/reps":
-            # Who the caller can claim to be, until real sign-in exists.
-            self._json(200, {"reps": sales_reps()})
+            # Who the caller can claim to be, until real sign-in exists. An
+            # empty list is reported with its reason: the picker falling back
+            # to "All" on its own looks identical to a company with no reps,
+            # and the difference matters to whoever has to fix it.
+            reps = sales_reps()
+            payload = {"reps": reps}
+            if not reps:
+                payload["error"] = (_reps_error or
+                                    ("DATABRICKS_WARM_TOKEN is not set" if not WARM_READY
+                                     else "no active reps returned"))
+            self._json(200, payload)
             return
 
         if route == "/api/capabilities":
@@ -575,6 +588,11 @@ def main() -> int:
     print("  Users   : " + ", ".join(sorted(auth.users())))
     print("  Limits  : %d conversations/user/hour" % auth.token_limit())
     print("  CSP     : " + ("on" if CSP else "off"))
+    if WARM_READY:
+        found = len(sales_reps())
+        print("  Reps    : " + ("%d in the picker" % found if found
+                                else "LOOKUP FAILED (%s) -- picker shows only All"
+                                     % (_reps_error or "unknown")))
     print("  Warm-up : " + ("warehouse %s, at most every %d min"
                             % (DBX_WAREHOUSE, WARM_EVERY // 60) if WARM_READY
                             else "off (set DATABRICKS_WARM_TOKEN to enable)"))
