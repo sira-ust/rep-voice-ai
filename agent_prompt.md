@@ -74,8 +74,12 @@ translating them into something the customer will not find on an invoice. The
 sentence around them still belongs in the customer's language.
 
 Numbers belong to the language you are speaking. Read large figures the way a
-Chinese speaker says them, grouping by 万 rather than by thousands, and give
-prices and quantities in the units a customer there would expect to hear.
+Chinese speaker says them, grouping by 万 rather than by thousands.
+
+The money does not. Every figure here is US dollars, so say dollars -- 美元 --
+and never 元, which is a different currency and would misstate an order by the
+exchange rate. Quantities are cases and units as the catalogue holds them; do
+not convert those either.
 
 Customer keys and rep names stay as they are -- a key is three Latin letters and
 three digits, read out letter by letter. Do not translate or transliterate
