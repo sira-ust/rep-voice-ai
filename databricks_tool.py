@@ -45,146 +45,43 @@ from pathlib import Path
 
 import common  # loads .env on import
 
+# SQL-building, spec-loading and Databricks-calling logic lives in common.py so
+# server.py's LLM proxy can run the exact same pinned queries without a second
+# copy of this code. Aliased to bare names so the rest of this file, and its
+# docstrings, read the same as before the split.
+Fail = common.Fail
+need = common.need
+load_specs = common.load_specs
+find_spec = common.find_spec
+statement = common.statement
+databricks = common.databricks
+run_sql = common.run_sql
+rows_of = common.rows_of
+
 ROOT = Path(__file__).resolve().parent
-TOOLS_FILE = ROOT / "databricks_tools.json"
+TOOLS_FILE = common.TOOLS_FILE
 EL_API = "https://api.elevenlabs.io/v1"
-UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) elevenlabs-webui/1.0"
+UA = common.UA
 TIMEOUT = 90
-
-
 
 EL_KEY = os.environ.get("ELEVENLABS_API_KEY", "").strip()
 AGENT_ID = os.environ.get("ELEVENLABS_AGENT_ID", "").strip()
 
-DBX_HOST = os.environ.get("DATABRICKS_HOST", "").strip().rstrip("/")
-DBX_TOKEN = os.environ.get("DATABRICKS_TOKEN", "").strip()
-DBX_WAREHOUSE = os.environ.get("DATABRICKS_WAREHOUSE_ID", "").strip()
+DBX_HOST = common.DBX_HOST
+DBX_TOKEN = common.DBX_TOKEN
+DBX_WAREHOUSE = common.DBX_WAREHOUSE
 SECRET_NAME = os.environ.get("DATABRICKS_SECRET_NAME", "DATABRICKS_BEARER").strip()
 # A cold serverless warehouse has taken 10-15s to answer. At a 10s ceiling that
 # surfaced to the caller as "I encountered an error" (HTTP 504).
-TOOL_TIMEOUT = int(os.environ.get("DATABRICKS_TOOL_TIMEOUT", "30") or 30)
-
-
-class Fail(Exception):
-    pass
-
-
-def need(**values) -> None:
-    missing = [k for k, v in values.items() if not v]
-    if missing:
-        raise Fail("Missing in .env: " + ", ".join(missing))
-
-
-# ------------------------------------------------------------------ specs
-
-def load_specs() -> list[dict]:
-    if not TOOLS_FILE.is_file():
-        raise Fail("%s not found" % TOOLS_FILE.name)
-    try:
-        raw = json.loads(TOOLS_FILE.read_text(encoding="utf-8-sig"))
-    except ValueError as exc:
-        raise Fail("%s is not valid JSON: %s" % (TOOLS_FILE.name, exc)) from exc
-
-    specs = raw.get("tools") if isinstance(raw, dict) else raw
-    if not isinstance(specs, list) or not specs:
-        raise Fail("%s has no tools" % TOOLS_FILE.name)
-
-    names = set()
-    for spec in specs:
-        required = ["name", "table", "description"]
-        # A rank tool orders by a named mode; it has no lookup column.
-        required.append("modes" if spec.get("kind") == "rank" else "lookup_column")
-        for field in required:
-            if not spec.get(field):
-                raise Fail("Tool %r is missing %r" % (spec.get("name", "?"), field))
-        if spec["name"] in names:
-            raise Fail("Duplicate tool name %r" % spec["name"])
-        names.add(spec["name"])
-    return specs
-
-
-def find_spec(specs: list[dict], name: str) -> dict:
-    for spec in specs:
-        if spec["name"] == name:
-            return spec
-    raise Fail("No tool named %r. Configured: %s"
-               % (name, ", ".join(s["name"] for s in specs)))
-
-
-def statement(spec: dict) -> str:
-    """The one query this tool can ever run.
-
-    match "exact"     -> WHERE col = :lookup_value       (key lookup)
-    match "contains"  -> WHERE lower(col) LIKE %value%    (contiguous phrase)
-    match "all_words" -> every word of the phrase appears somewhere in col
-
-    Prefer "all_words" for anything a person says aloud. Catalogue names are
-    terse and abbreviated, so a contiguous match misses badly: "pad thai
-    noodles" never matches "DF FRESH PAD THAI NOODLE" because of the plural.
-    all_words splits on whitespace, drops punctuation, and strips one trailing
-    "s" per word, so word order, extra words and plurals all stop mattering.
-
-    `latest_week_column` pins the query to the newest period, so a search over a
-    weekly-snapshot table returns each product once rather than once per week.
-    """
-    columns = spec.get("columns") or []
-    select = ", ".join(columns) if columns else "*"
-    table = spec["table"]
-
-    # kind "rank": the model picks a named mode from an enum instead of supplying
-    # a search value. The mode selects which column to order by, through a CASE
-    # over the bound parameter -- SQL parameters bind values, never identifiers,
-    # so ORDER BY :col is impossible and this is the safe equivalent. Negating
-    # the expression flips the direction, so "top" and "lowest" are both modes.
-    if spec.get("kind") == "rank":
-        modes = spec.get("modes") or {}
-        if not modes:
-            raise Fail("Tool %r is kind 'rank' but has no modes" % spec["name"])
-        branches = " ".join(
-            "WHEN '%s' THEN %s" % (name, expr) for name, expr in modes.items())
-        order = "CASE :lookup_value %s END ASC NULLS LAST" % branches
-
-        where = []
-        period = spec.get("latest_week_column")
-        if period:
-            where.append("%s = (SELECT MAX(%s) FROM %s)" % (period, period, table))
-        sql = "SELECT %s FROM %s" % (select, table)
-        if where:
-            sql += " WHERE " + " AND ".join(where)
-        return sql + " ORDER BY %s LIMIT %d" % (order, int(spec.get("limit", 5)))
-
-    column = spec["lookup_column"]
-    match = spec.get("match", "exact")
-
-    if match == "all_words":
-        # Each word must appear in the name, OR in the name with spaces removed.
-        # The second test is what makes "padthai" find "PAD THAI NOODLE" and
-        # "pad thai" find "PADTHAI RICE STICK" -- this catalogue spells it both
-        # ways, which no amount of model-side normalising can guess.
-        where = [
-            "forall("
-            "split(regexp_replace(lower(trim(:lookup_value)), '[^a-z0-9 ]', ' '), '\\\\s+'),"
-            " w -> w = ''"
-            " OR lower({c}) LIKE concat('%%', regexp_replace(w, 's$', ''), '%%')"
-            " OR replace(lower({c}), ' ', '') LIKE concat('%%', regexp_replace(w, 's$', ''), '%%')"
-            ")".format(c=column)
-        ]
-    elif match == "contains":
-        where = ["lower(%s) LIKE lower(concat('%%', :lookup_value, '%%'))" % column]
-    else:
-        where = ["%s = :lookup_value" % column]
-
-    period = spec.get("latest_week_column")
-    if period:
-        where.append("%s = (SELECT MAX(%s) FROM %s)" % (period, period, table))
-
-    sql = "SELECT %s FROM %s WHERE %s" % (select, table, " AND ".join(where))
-    if spec.get("order_by"):
-        sql += " ORDER BY " + spec["order_by"]
-    return sql + " LIMIT %d" % int(spec.get("limit", 1))
+TOOL_TIMEOUT = common.DBX_TOOL_TIMEOUT
 
 
 # ------------------------------------------------------------------ http
+#
+# Only the ElevenLabs-facing call stays here: common.py's Databricks helpers
+# cover run_sql/databricks already, and this repo's other ElevenLabs-calling
+# scripts (configure_llm.py, configure_prompt.py, ...) each keep their own copy
+# of this same small wrapper rather than share one, so this follows suit.
 
 def request(url: str, method: str, headers: dict, body: dict | None) -> dict:
     data = json.dumps(body).encode("utf-8") if body is not None else None
@@ -210,25 +107,6 @@ def elevenlabs(path: str, method: str = "GET", body: dict | None = None) -> dict
     return request(EL_API + path, method, {"xi-api-key": EL_KEY}, body)
 
 
-def databricks(body: dict) -> dict:
-    need(DATABRICKS_HOST=DBX_HOST, DATABRICKS_TOKEN=DBX_TOKEN,
-         DATABRICKS_WAREHOUSE_ID=DBX_WAREHOUSE)
-    return request(DBX_HOST + "/api/2.0/sql/statements/", "POST",
-                   {"Authorization": "Bearer " + DBX_TOKEN}, body)
-
-
-def run_sql(spec: dict, value: str) -> dict:
-    return databricks({
-        "warehouse_id": DBX_WAREHOUSE,
-        "statement": statement(spec),
-        "parameters": [{"name": "lookup_value", "value": value, "type": "STRING"}],
-        "wait_timeout": "50s",
-        "on_wait_timeout": "CANCEL",
-        "disposition": "INLINE",
-        "format": "JSON_ARRAY",
-    })
-
-
 def run_adhoc(sql: str) -> dict:
     """One-off SELECT for setup and diagnostics. Not reachable by the agent."""
     return databricks({
@@ -239,12 +117,6 @@ def run_adhoc(sql: str) -> dict:
         "disposition": "INLINE",
         "format": "JSON_ARRAY",
     })
-
-
-def rows_of(result: dict) -> tuple[list, list]:
-    cols = [c.get("name") for c in
-            (((result.get("manifest") or {}).get("schema") or {}).get("columns") or [])]
-    return cols, ((result.get("result") or {}).get("data_array") or [])
 
 
 # ------------------------------------------------------------------ diagnostics

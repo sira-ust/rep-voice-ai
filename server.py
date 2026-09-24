@@ -15,6 +15,7 @@ Configuration lives in .env (see .env.example).
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import mimetypes
 import os
@@ -118,6 +119,131 @@ def warm_warehouse(reason: str) -> None:
             sys.stderr.write("  WARM failed: %s (%s)\n" % (exc, reason))
 
     threading.Thread(target=run, daemon=True, name="dbx-warm").start()
+
+
+# ---- LLM proxy: the only place Databricks is ever reached from a live call --
+# ElevenLabs POSTs here (CUSTOM_LLM_URL) instead of straight to the real
+# Gemma/vLLM host. We run the model, execute any tool call it asks for
+# ourselves using DATABRICKS_TOKEN (never given to ElevenLabs), and hand back
+# only the final plain-text answer -- ElevenLabs never sees a tool exists.
+LLM_UPSTREAM_URL = os.environ.get("LLM_UPSTREAM_URL", "").strip().rstrip("/")
+LLM_UPSTREAM_KEY = os.environ.get("LLM_UPSTREAM_API_KEY", "").strip()
+# A WAF/CDN in front of the LLM host (Cloudflare, for testai.qskyabc.com) can
+# 403 a non-browser User-Agent, which otherwise surfaces as a generic
+# "trouble finding that" failure indistinguishable from a real model error.
+LLM_UPSTREAM_USER_AGENT = os.environ.get("LLM_UPSTREAM_USER_AGENT", "").strip()
+LLM_PROXY_SECRET = os.environ.get("LLM_PROXY_SECRET", "").strip()
+try:
+    LLM_PROXY_MAX_ROUNDS = max(1, int(os.environ.get("LLM_PROXY_MAX_TOOL_ROUNDS", "3") or 3))
+except ValueError:
+    LLM_PROXY_MAX_ROUNDS = 3
+LLM_PROXY_READY = bool(LLM_UPSTREAM_URL and LLM_PROXY_SECRET)
+
+_tool_specs_cache: list[dict] | None = None
+
+
+def tool_specs() -> list[dict]:
+    """databricks_tools.json, loaded once. A missing/broken file disables tool
+    calls but not the LLM proxy -- plain questions still get answered."""
+    global _tool_specs_cache
+    if _tool_specs_cache is None:
+        try:
+            _tool_specs_cache = common.load_specs()
+        except common.Fail as exc:
+            sys.stderr.write("  LLM proxy: %s -- tool calls disabled\n" % exc)
+            _tool_specs_cache = []
+    return _tool_specs_cache
+
+
+def openai_tool_schema(spec: dict) -> dict:
+    """One databricks_tools.json entry as an OpenAI function-calling tool --
+    the same information tool_payload() in databricks_tool.py sends ElevenLabs,
+    just in the other dialect: a single string argument named `value`."""
+    label = spec.get("value_label") or spec.get("lookup_column") or "value"
+    hint = "The exact %s to search for." % label
+    if spec.get("example"):
+        hint += " For example %s." % spec["example"]
+    return {
+        "type": "function",
+        "function": {
+            "name": spec["name"],
+            "description": spec["description"],
+            "parameters": {
+                "type": "object",
+                "required": ["value"],
+                "properties": {"value": {"type": "string", "description": hint}},
+            },
+        },
+    }
+
+
+def run_tool_call(name: str, value: str) -> str:
+    """Run one pinned Databricks lookup -- same statement()/run_sql() the
+    ElevenLabs webhook tools used -- and return its rows as JSON text for the
+    model to read back."""
+    try:
+        spec = common.find_spec(tool_specs(), name)
+        result = common.run_sql(spec, value)
+        state = (result.get("status") or {}).get("state")
+        if state != "SUCCEEDED":
+            return json.dumps({"error": "Databricks returned %s" % state})
+        cols, rows = common.rows_of(result)
+        return json.dumps({"columns": cols, "rows": rows})
+    except common.Fail as exc:
+        return json.dumps({"error": str(exc)})
+
+
+def call_upstream_llm(messages: list, model: str, max_tokens: int, tools: list) -> dict:
+    """One non-streaming call to the real Gemma/vLLM host."""
+    body = {"model": model, "messages": messages, "max_tokens": max_tokens, "stream": False}
+    if tools:
+        body["tools"] = tools
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if LLM_UPSTREAM_KEY:
+        headers["Authorization"] = "Bearer " + LLM_UPSTREAM_KEY
+    if LLM_UPSTREAM_USER_AGENT:
+        headers["User-Agent"] = LLM_UPSTREAM_USER_AGENT
+    req = urllib.request.Request(
+        LLM_UPSTREAM_URL + "/chat/completions",
+        data=json.dumps(body).encode("utf-8"), headers=headers, method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return json.loads(resp.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as exc:
+        raise UpstreamError(exc.code, exc.read().decode("utf-8", "replace")[:500]) from exc
+    except urllib.error.URLError as exc:
+        raise UpstreamError(502, "Could not reach the LLM host: %s" % exc.reason) from exc
+
+
+def run_llm_with_tools(messages: list, model: str, max_tokens: int) -> str:
+    """The tool-calling loop that used to run on ElevenLabs' side: ask the
+    model, execute anything it asks for ourselves, feed the result back, and
+    repeat until it answers in plain text (or we hit the round cap)."""
+    tools = [openai_tool_schema(s) for s in tool_specs()]
+    history = list(messages)
+
+    for _ in range(LLM_PROXY_MAX_ROUNDS):
+        completion = call_upstream_llm(history, model, max_tokens, tools)
+        message = ((completion.get("choices") or [{}])[0]).get("message") or {}
+        calls = message.get("tool_calls") or []
+        if not calls:
+            return message.get("content") or ""
+
+        history.append(message)
+        for call in calls:
+            fn = call.get("function") or {}
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+            except ValueError:
+                args = {}
+            history.append({
+                "role": "tool",
+                "tool_call_id": call.get("id"),
+                "content": run_tool_call(fn.get("name") or "", args.get("value") or ""),
+            })
+
+    return "I'm sorry, I'm having trouble finding that right now."
 
 
 CSP = os.environ.get("APP_CSP", "on").strip().lower() not in ("off", "0", "false")
@@ -325,6 +451,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         route = urllib.parse.urlparse(self.path).path.rstrip("/") or "/"
+
+        # Called by ElevenLabs' backend, not the rep's browser -- machine to
+        # machine, so it is authenticated by a bearer secret instead of the
+        # session cookie every /api/* route requires.
+        if route == "/llm/v1/chat/completions":
+            self._handle_llm_proxy()
+            return
+
         if route != "/login":
             self._send(404, b"Not found", "text/plain; charset=utf-8")
             return
@@ -465,6 +599,68 @@ class Handler(BaseHTTPRequestHandler):
 
         self._json(404, {"error": "Unknown API route: " + route})
 
+    def _handle_llm_proxy(self) -> None:
+        """OpenAI-compatible chat completions endpoint for ElevenLabs' custom_llm.
+
+        Runs the whole tool-calling loop here instead of on ElevenLabs' side, so
+        the Databricks credential and every query it runs stay on this server.
+        ElevenLabs gets back a plain-text answer and never learns a tool exists.
+        """
+        if not LLM_PROXY_READY:
+            self._json(500, {"error": "LLM proxy not configured -- set LLM_UPSTREAM_URL "
+                                       "and LLM_PROXY_SECRET in .env"})
+            return
+
+        expected = "Bearer " + LLM_PROXY_SECRET
+        if not hmac.compare_digest(self.headers.get("Authorization", ""), expected):
+            self._json(401, {"error": "Unauthorized"})
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length <= 0 or length > 1_000_000:
+            self._json(400, {"error": "Bad request"})
+            return
+
+        try:
+            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        except ValueError:
+            self._json(400, {"error": "Malformed JSON body"})
+            return
+
+        model = payload.get("model") or ""
+        messages = payload.get("messages") or []
+        try:
+            max_tokens = int(payload.get("max_tokens") or 512)
+        except (TypeError, ValueError):
+            max_tokens = 512
+        if max_tokens < 1:  # ElevenLabs' "unlimited" sentinel is -1; vLLM rejects it.
+            max_tokens = 512
+
+        try:
+            answer = run_llm_with_tools(messages, model, max_tokens)
+        except UpstreamError as exc:
+            sys.stderr.write("  LLM proxy upstream error: %s\n" % exc.message)
+            answer = "I'm sorry, I ran into a problem answering that."
+        except Exception as exc:  # noqa: BLE001 - never kill the server on a bad turn
+            sys.stderr.write("  LLM proxy error: %s: %s\n" % (type(exc).__name__, exc))
+            answer = "I'm sorry, I ran into a problem answering that."
+
+        # A single fake SSE chunk: ElevenLabs requires text/event-stream, but
+        # nothing requires token-by-token streaming -- v1 waits for the whole
+        # answer (including any Databricks round trip) before replying once.
+        final = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+        chunk = {
+            "id": "chatcmpl-proxy", "object": "chat.completion.chunk", "model": model,
+            "choices": [{"index": 0, "delta": {"role": "assistant", "content": answer},
+                         "finish_reason": None}],
+        }
+        body = ("data: %s\n\ndata: %s\n\ndata: [DONE]\n\n"
+                % (json.dumps(chunk), json.dumps(final))).encode("utf-8")
+        self._send(200, body, "text/event-stream; charset=utf-8")
+
     def _serve_static(self, url_path: str) -> None:
         rel = urllib.parse.unquote(url_path).lstrip("/") or "index.html"
         base = PUBLIC.resolve()
@@ -506,6 +702,9 @@ def main() -> int:
     print("  Warm-up : " + ("warehouse %s, at most every %d min"
                             % (DBX_WAREHOUSE, WARM_EVERY // 60) if WARM_READY
                             else "off (set DATABRICKS_WARM_TOKEN to enable)"))
+    print("  LLM proxy: " + ("ready -> %s (%d tool(s))"
+                             % (LLM_UPSTREAM_URL, len(tool_specs())) if LLM_PROXY_READY
+                             else "NOT CONFIGURED -- set LLM_UPSTREAM_URL and LLM_PROXY_SECRET"))
     if not auth.users():
         print("")
         print("  NO ACCOUNTS CONFIGURED, so every login will fail. Add one:")
