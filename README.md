@@ -259,11 +259,20 @@ That leaves two settings on the agent, both deliberate:
 | --- | --- | --- |
 | `background_voice_detection` | `on` | ElevenLabs defaults this off |
 | `turn_eagerness` | `normal` | `eager` fired on fragments of other people's speech |
+| `turn_timeout` | `20s` | at 12s the agent's own slow generation tripped it |
 
 `eager` was set originally to shave latency, and it does — but it commits to a
 turn on the slightest speech-shaped sound, which in a shared room means
 answering someone who was not talking to it. `normal` waits for a natural
 break, costing a few hundred milliseconds a turn.
+
+`turn_timeout` is how long it waits through silence before speaking again. At
+12s it was firing during the agent's *own* pause: a call showed a tool result
+arriving at 67s and the reply not starting until 82s, so the timeout went off
+first and it asked the caller why they had gone quiet — then lost the thread of
+what it had been doing. 20s clears the gap. The real cause is how long the
+custom LLM takes to generate after a tool result, and this only stops it
+becoming a loop.
 
 ```sh
 python configure_audio.py --eagerness normal   # current

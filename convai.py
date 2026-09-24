@@ -123,7 +123,7 @@ class WebSocketClient:
 
 
 def converse(messages: list[str], quiet: float = 10.0, cap: float = 75.0,
-             on_agent=None, on_user=None) -> dict:
+             on_agent=None, on_user=None, rep: str = "") -> dict:
     """Say each message in turn, waiting for the agent to finish between them.
 
     Turn boundaries come from silence, not from counting replies. A tool-calling
@@ -140,6 +140,11 @@ def converse(messages: list[str], quiet: float = 10.0, cap: float = 75.0,
     ws.send(json.dumps({
         "type": "conversation_initiation_client_data",
         "conversation_config_override": {"conversation": {"text_only": True}},
+        # The prompt reads {{rep_name}}, and a referenced variable with nothing
+        # behind it fails the session rather than resolving to blank. The web
+        # page sends whoever is picked; here "All" is the honest default, and
+        # callers who are testing a rep's own numbers say so in the message.
+        "dynamic_variables": {"rep_name": rep or "All"},
     }))
 
     result = {"conversation_id": None, "opener": None, "replies": [], "error": None}
@@ -242,6 +247,11 @@ def tool_calls(conversation_id: str, attempts: int = 8, pause: float = 3.0) -> l
                     "values": _values(params.get("parameters")),
                     "rows": 0,
                 })
+        # Pair each result with its own call. This used to hand every result to
+        # the first call still showing zero rows, which silently swapped the
+        # numbers around whenever one lookup in a conversation came back empty
+        # -- and then the test output blamed the wrong tool.
+        pending = {}
         for turn in detail.get("transcript", []):
             for res in (turn.get("tool_results") or []):
                 try:
@@ -249,10 +259,11 @@ def tool_calls(conversation_id: str, attempts: int = 8, pause: float = 3.0) -> l
                 except (ValueError, TypeError):
                     continue
                 rows = len(((value.get("result") or {}).get("data_array")) or [])
-                for call in calls:
-                    if call["rows"] == 0:
-                        call["rows"] = rows
-                        break
+                pending.setdefault(res.get("tool_name"), []).append(rows)
+        for call in calls:
+            queue = pending.get(call["tool"])
+            if queue:
+                call["rows"] = queue.pop(0)
         if calls:
             return calls
         if attempt < attempts - 1:
