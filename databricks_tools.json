@@ -221,7 +221,8 @@
         "What did Red Apple Market buy last month?",
         "How are returns looking for that account?"
       ],
-      "answer_example": "Five invoices this month. Only part of that is priced in our data, so I can give you the count with confidence but not the full value."
+      "answer_example": "Five invoices this month. Only part of that is priced in our data, so I can give you the count with confidence but not the full value.",
+      "rep_column": "owner_rep_name"
     },
     {
       "name": "lookup_account_top_items",
@@ -253,7 +254,8 @@
       "answer_example": "They buy KYJ Pork Sausage most often — five hundred and ninety-five times, last on the eleventh of August.",
       "filters": [
         "item_label IS NOT NULL"
-      ]
+      ],
+      "rep_column": "owner_rep_name"
     },
     {
       "name": "lookup_pitch_list",
@@ -287,7 +289,8 @@
       "answer_example": "They are due for Soy Bean with Ginger Sauce, and Punjas Butter Snap Cookies are worth a mention. Want the detail on either?",
       "filters": [
         "item_label IS NOT NULL"
-      ]
+      ],
+      "rep_column": "owner_rep_name"
     },
     {
       "name": "search_items",
@@ -382,7 +385,8 @@
         "How is Asian Market doing?",
         "Look up Lee's Sandwiches"
       ],
-      "answer_example": "I found one Red Apple Market in Anchorage, owned by Tech Tov. Would you like their recent activity?"
+      "answer_example": "I found one Red Apple Market in Anchorage, owned by Tech Tov. Would you like their recent activity?",
+      "rep_column": "owner_rep_name"
     },
     {
       "name": "lookup_account_status",
@@ -415,7 +419,8 @@
         "When did RED005 last order?",
         "Which days does RED005 take deliveries?"
       ],
-      "answer_example": "Red Apple Market last ordered on the twenty-second, one day ago. Twenty-three orders recently, averaging about twenty-four thousand dollars."
+      "answer_example": "Red Apple Market last ordered on the twenty-second, one day ago. Twenty-three orders recently, averaging about twenty-four thousand dollars.",
+      "rep_column": "rep_name"
     },
     {
       "name": "lookup_accounts_to_call",
@@ -473,7 +478,8 @@
         "I'm at Red Apple Market, who else is nearby?",
         "Who near here has gone quiet?"
       ],
-      "answer_example": "Three within five kilometres. The closest that has gone quiet is a mile off and has not ordered in ninety days."
+      "answer_example": "Three within five kilometres. The closest that has gone quiet is a mile off and has not ordered in ninety days.",
+      "rep_column": "rep_name"
     }
   ],
   "tbd": {

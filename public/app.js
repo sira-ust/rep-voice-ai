@@ -407,11 +407,24 @@ async function startConversation() {
     const rep = el.repSelect ? el.repSelect.value : "";
     log("out", "signed in as", rep || "All reps");
 
+    // A signed statement of whose accounts this conversation may read. The
+    // page cannot mint one and the agent cannot alter one, so the rep survives
+    // the round trip through ElevenLabs without being something anyone on the
+    // call can change. Sent as an extra body field, which ElevenLabs passes
+    // through to our own LLM endpoint untouched.
+    let scopeToken = "";
+    try {
+      ({ scopeToken } = await getJSON(`/api/scope?rep=${encodeURIComponent(rep)}`));
+    } catch (err) {
+      log("err", "scope token failed", err.message || String(err));
+    }
+
     state.conversation = await Conversation.startSession({
       ...auth,
       connectionType,
       textOnly: false,
       dynamicVariables: { rep_name: rep || "All" },
+      customLlmExtraBody: { scope_token: scopeToken },
 
       onConnect: ({ conversationId }) => {
         log("cb", "onConnect", conversationId);

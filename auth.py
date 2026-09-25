@@ -168,6 +168,53 @@ def read_session(cookie_value: str | None) -> str | None:
     return name if name in users() else None
 
 
+def issue_scope(rep: str, seconds: int = 4 * 3600) -> str:
+    """A signed statement of whose accounts a conversation may read.
+
+    The proxy is called by ElevenLabs, not by the browser, so no cookie
+    reaches it and it cannot ask who is on the phone. This token carries the
+    answer across that gap. It is minted here, where the session is known, and
+    the proxy will only act on one it can verify -- so the rep is not
+    something the page can assert, the model can invent, or a caller can talk
+    the agent into changing.
+
+    Short-lived because it rides through a third party. Long enough for a
+    conversation, not for a working day.
+    """
+    payload = json.dumps({"rep": rep, "exp": int(time.time()) + seconds},
+                         separators=(",", ":")).encode("utf-8")
+    body = base64.urlsafe_b64encode(payload).decode().rstrip("=")
+    sig = hmac.new(_secret(), body.encode("ascii"), hashlib.sha256).digest()
+    return "%s.%s" % (body, base64.urlsafe_b64encode(sig).decode().rstrip("="))
+
+
+def read_scope(token: str | None) -> str | None:
+    """The rep a scope token names, or None if it is absent, forged or stale.
+
+    None is not "no restriction" -- callers must treat it as untrusted and
+    refuse, or an expired token would silently widen access to everything.
+    """
+    if not token or "." not in token:
+        return None
+    body, _, sig_b64 = token.rpartition(".")
+    pad = lambda s: s + "=" * (-len(s) % 4)  # noqa: E731
+    try:
+        given = base64.urlsafe_b64decode(pad(sig_b64))
+    except (ValueError, TypeError):
+        return None
+    expected = hmac.new(_secret(), body.encode("ascii"), hashlib.sha256).digest()
+    if not hmac.compare_digest(given, expected):
+        return None
+    try:
+        claims = json.loads(base64.urlsafe_b64decode(pad(body)))
+    except (ValueError, TypeError):
+        return None
+    if int(claims.get("exp", 0)) < time.time():
+        return None
+    rep = claims.get("rep")
+    return rep if isinstance(rep, str) else None
+
+
 # ------------------------------------------------------------------ rate limit
 
 class RateLimiter:

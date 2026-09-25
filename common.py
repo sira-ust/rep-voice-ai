@@ -149,7 +149,20 @@ def find_spec(specs: list[dict], name: str) -> dict:
                % (name, ", ".join(s["name"] for s in specs)))
 
 
-def statement(spec: dict) -> str:
+def rep_clause(spec: dict) -> str:
+    """The predicate that limits a lookup to one rep's accounts, or "".
+
+    Bound as a parameter rather than pasted in: the rep arrives from outside
+    this process, and a name with an apostrophe in it would otherwise be a
+    broken query at best. `rep_column` names the column that says whose account
+    a row is -- tools already keyed on the rep need none, and products belong
+    to nobody, so both come back empty.
+    """
+    column = spec.get("rep_column")
+    return " AND %s = :rep_name" % column if column else ""
+
+
+def statement(spec: dict, rep: str = "") -> str:
     """The one query this tool can ever run.
 
     match "exact"     -> WHERE col = :lookup_value       (key lookup)
@@ -200,6 +213,9 @@ def statement(spec: dict) -> str:
         sql = "SELECT %s FROM %s" % (select, table)
         if where:
             sql += " WHERE " + " AND ".join(where)
+        clause = rep_clause(spec) if rep else ""
+        if clause:
+            sql += (" WHERE" + clause[4:]) if not where else clause
         return sql + " ORDER BY %s LIMIT %d" % (order, int(spec.get("limit", 5)))
 
     column = spec["lookup_column"]
@@ -230,6 +246,8 @@ def statement(spec: dict) -> str:
     where.extend(spec.get("filters") or [])
 
     sql = "SELECT %s FROM %s WHERE %s" % (select, table, " AND ".join(where))
+    if rep:
+        sql += rep_clause(spec)
     if spec.get("order_by"):
         sql += " ORDER BY " + spec["order_by"]
     return sql + " LIMIT %d" % int(spec.get("limit", 1))
@@ -263,11 +281,17 @@ def databricks(body: dict) -> dict:
                      {"Authorization": "Bearer " + DBX_TOKEN}, body)
 
 
-def run_sql(spec: dict, value: str) -> dict:
+def run_sql(spec: dict, value: str, rep: str = "") -> dict:
+    """Run a pinned lookup. `rep` limits it to that rep's accounts where the
+    spec says which column decides that; an empty rep means no limit, which is
+    what a manager gets."""
+    params = [{"name": "lookup_value", "value": value, "type": "STRING"}]
+    if rep and spec.get("rep_column"):
+        params.append({"name": "rep_name", "value": rep, "type": "STRING"})
     return databricks({
         "warehouse_id": DBX_WAREHOUSE,
-        "statement": statement(spec),
-        "parameters": [{"name": "lookup_value", "value": value, "type": "STRING"}],
+        "statement": statement(spec, rep),
+        "parameters": params,
         "wait_timeout": "50s",
         "on_wait_timeout": "CANCEL",
         "disposition": "INLINE",

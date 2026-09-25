@@ -177,13 +177,18 @@ def openai_tool_schema(spec: dict) -> dict:
     }
 
 
-def run_tool_call(name: str, value: str) -> str:
-    """Run one pinned Databricks lookup -- same statement()/run_sql() the
-    ElevenLabs webhook tools used -- and return its rows as JSON text for the
-    model to read back."""
+def run_tool_call(name: str, value: str, rep: str = "") -> str:
+    """Run one pinned Databricks lookup and return its rows as JSON text.
+
+    `rep` limits the lookup to that rep's accounts. It comes from a signed
+    token, never from the model: the model picks which tool to run and what to
+    search for, and has no say in whose data it searches. A rep asking about a
+    colleague's store gets an empty result, the same shape a genuinely unknown
+    store returns, so there is nothing to infer from the difference.
+    """
     try:
         spec = common.find_spec(tool_specs(), name)
-        result = common.run_sql(spec, value)
+        result = common.run_sql(spec, value, rep)
         state = (result.get("status") or {}).get("state")
         if state != "SUCCEEDED":
             return json.dumps({"error": "Databricks returned %s" % state})
@@ -216,7 +221,7 @@ def call_upstream_llm(messages: list, model: str, max_tokens: int, tools: list) 
         raise UpstreamError(502, "Could not reach the LLM host: %s" % exc.reason) from exc
 
 
-def run_llm_with_tools(messages: list, model: str, max_tokens: int) -> str:
+def run_llm_with_tools(messages: list, model: str, max_tokens: int, rep: str = "") -> str:
     """The tool-calling loop that used to run on ElevenLabs' side: ask the
     model, execute anything it asks for ourselves, feed the result back, and
     repeat until it answers in plain text (or we hit the round cap)."""
@@ -240,7 +245,8 @@ def run_llm_with_tools(messages: list, model: str, max_tokens: int) -> str:
             history.append({
                 "role": "tool",
                 "tool_call_id": call.get("id"),
-                "content": run_tool_call(fn.get("name") or "", args.get("value") or ""),
+                "content": run_tool_call(fn.get("name") or "",
+                                         args.get("value") or "", rep),
             })
 
     return "I'm sorry, I'm having trouble finding that right now."
@@ -567,6 +573,22 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
 
+        if route == "/api/scope":
+            # Mint the scope for a conversation. The rep must be one the
+            # directory actually lists: without that check the page could ask
+            # for a scope naming anything, and the signature would make it
+            # look authoritative.
+            wanted = (query.get("rep") or [""])[0].strip()
+            if wanted and wanted not in {r["name"] for r in sales_reps()}:
+                self._json(400, {"error": "Unknown rep"})
+                return
+            # TODO: once sign-in maps a user to a rep, take the rep from the
+            # session instead of the query string. The proxy side does not
+            # change -- it already trusts only what this endpoint signed.
+            self._json(200, {"scopeToken": auth.issue_scope(wanted),
+                             "rep": wanted})
+            return
+
         if route == "/api/reps":
             # Who the caller can claim to be, until real sign-in exists. An
             # empty list is reported with its reason: the picker falling back
@@ -715,6 +737,18 @@ class Handler(BaseHTTPRequestHandler):
 
         model = payload.get("model") or ""
         messages = payload.get("messages") or []
+
+        # Whose accounts this conversation may read. Minted by /api/scope where
+        # the signed-in session is known, carried here by ElevenLabs as an
+        # extra body field. Anything unsigned, forged or expired is refused
+        # rather than waved through -- treating a bad token as "no limit" would
+        # turn every failure into full access.
+        scope_token = payload.get("scope_token") or ""
+        rep = auth.read_scope(scope_token)
+        if rep is None:
+            sys.stderr.write("  LLM proxy: refused, scope token missing or invalid\n")
+            self._json(403, {"error": "A valid scope token is required."})
+            return
         try:
             max_tokens = int(payload.get("max_tokens") or 512)
         except (TypeError, ValueError):
@@ -723,7 +757,7 @@ class Handler(BaseHTTPRequestHandler):
             max_tokens = 512
 
         try:
-            answer = run_llm_with_tools(messages, model, max_tokens)
+            answer = run_llm_with_tools(messages, model, max_tokens, rep)
         except UpstreamError as exc:
             sys.stderr.write("  LLM proxy upstream error: %s\n" % exc.message)
             answer = "I'm sorry, I ran into a problem answering that."
