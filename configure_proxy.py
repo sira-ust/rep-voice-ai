@@ -12,9 +12,17 @@ Nothing needs to reach this server, so it works from a laptop.
 
 **proxy**: ElevenLabs calls this server as an ordinary OpenAI-compatible model
 and never learns a tool exists. The tool loop, the Databricks token and every
-row stay here; only the spoken answer leaves. That is also the only way a
-lookup can be limited to the rep who asked, because the scope token travels
-with the request and nothing on ElevenLabs' side knows who is on the phone.
+row stay here; only the spoken answer leaves, and the workspace secret holding
+the Databricks token is deleted, so ElevenLabs has no way to reach the
+warehouse rather than merely no reason to.
+
+It is also the only arrangement where a lookup can be limited to the rep who
+asked: the scope token travels with the request, and nothing on ElevenLabs'
+side knows who is on the phone.
+
+What it does not change is the transcript. ElevenLabs still stores what was
+said, and a spoken answer names accounts and figures -- so this moves the
+exposure from whole result sets to the sentences read out, not to nothing.
 
 The cost is that this server joins the live call path. A restart mid-call ends
 the call, and the host has to be reachable from the public internet.
@@ -41,6 +49,7 @@ PROXY_SECRET = os.environ.get("LLM_PROXY_SECRET", "").strip()
 PROXY_SECRET_NAME = os.environ.get("LLM_PROXY_SECRET_NAME", "LLM_PROXY_BEARER").strip()
 UPSTREAM_MODEL = os.environ.get("CUSTOM_LLM_MODEL", "").strip()
 DIRECT_URL = os.environ.get("CUSTOM_LLM_URL", "").strip()
+DBX_SECRET_NAME = os.environ.get("DATABRICKS_SECRET_NAME", "DATABRICKS_BEARER").strip()
 
 
 # What the agent looked like before the switch, so --off puts back exactly
@@ -167,6 +176,17 @@ def turn_on(base_url: str) -> None:
        }}}})
     kept = len(prompt_of(before).get("tool_ids") or [])
     print("  detached  : %d webhook tool(s) -- the proxy supplies tools itself" % kept)
+
+    # Detaching the tools stops ElevenLabs using the warehouse; deleting the
+    # secret stops it being able to. A credential it holds but does not use is
+    # still a credential it holds, and the point of this switch is that it has
+    # no way to reach the data at all.
+    for secret in el("/convai/secrets").get("secrets", []):
+        if secret.get("name") == DBX_SECRET_NAME:
+            el("/convai/secrets/" + secret["secret_id"], "DELETE")
+            print("  deleted   : %s -- ElevenLabs no longer holds a Databricks "
+                  "credential" % DBX_SECRET_NAME)
+            break
     describe(agent())
 
 
@@ -190,6 +210,12 @@ def turn_off() -> None:
        }}}})
     print("  restored  : %d webhook tool(s)" % len(saved.get("tool_ids") or []))
     STATE_FILE.unlink()
+    # Those tools authenticate with a secret --on deleted, so they are pointing
+    # at nothing until it is recreated. Say so plainly: a restored tool that
+    # quietly fails is worse than one that is obviously missing.
+    print("\n  The Databricks secret was deleted when the proxy went on, so the")
+    print("  restored tools cannot authenticate yet. Finish with:")
+    print("      python databricks_tool.py --sync")
     describe(agent())
 
 
