@@ -188,6 +188,13 @@ def run_tool_call(name: str, value: str, rep: str = "") -> str:
     """
     try:
         spec = common.find_spec(tool_specs(), name)
+        # A tool keyed on the rep does not need the model to tell us who that
+        # is -- the scope token already did, and asking twice only creates a
+        # way to disagree. It duly disagreed: reading the rep out of the system
+        # prompt, the model passed the unsubstituted "{{rep_name}}" through as
+        # a name and every one of those lookups came back empty.
+        if (spec.get("lookup_column") or "").endswith("rep_name") and not spec.get("rep_column"):
+            value = rep or value
         result = common.run_sql(spec, value, rep)
         state = (result.get("status") or {}).get("state")
         if state != "SUCCEEDED":
@@ -273,14 +280,32 @@ def run_llm_with_tools(messages: list, model: str, max_tokens: int, rep: str = "
                 args = json.loads(fn.get("arguments") or "{}")
             except ValueError:
                 args = {}
+            name, value = fn.get("name") or "", args.get("value") or ""
+            result = run_tool_call(name, value, rep)
+            # One line per lookup, because when an answer is wrong the first
+            # question is always which tool ran and what it was asked for.
+            # Rows counted rather than printed: they are customer data, and
+            # this goes to a log.
+            try:
+                parsed = json.loads(result)
+                outcome = (parsed.get("error") or "%d row(s)"
+                           % len(parsed.get("rows") or []))
+            except ValueError:
+                outcome = "unreadable"
+            sys.stderr.write("  TOOL %s(%r) as %s -> %s\n"
+                             % (name, value, rep or "All reps", outcome))
             history.append({
                 "role": "tool",
                 "tool_call_id": call.get("id"),
-                "content": run_tool_call(fn.get("name") or "",
-                                         args.get("value") or "", rep),
+                "content": result,
             })
 
-    return "I'm sorry, I'm having trouble finding that right now."
+    # Out of rounds with the model still asking for tools. Saying the lookup
+    # failed is wrong -- they may well have succeeded -- so say what is true.
+    sys.stderr.write("  TOOL loop hit the %d-round cap without an answer\n"
+                     % LLM_PROXY_MAX_ROUNDS)
+    return ("I looked that up but could not put an answer together. "
+            "Could you ask me a slightly simpler question?")
 
 # The rep list for the picker. Cached, because it changes about as often as
 # somebody joins the company and every sign-in would otherwise wake the
