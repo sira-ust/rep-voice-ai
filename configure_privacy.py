@@ -110,7 +110,19 @@ def main() -> int:
     parser.add_argument("--apply-to-existing", action="store_true",
                         help="also schedule deletion for conversations already recorded "
                              "(IRREVERSIBLE)")
+    parser.add_argument("--force", action="store_true",
+                        help="allow changing an agent not named *-test")
     args = parser.parse_args()
+
+    # One agent serves every deployment, so a mutating run here reaches
+    # production unless it is pointed somewhere else. Reads are left alone.
+    if args.zrm or args.record_voice or args.retention_days:
+        try:
+            common.require_test_agent("This", force=args.force)
+        except common.Fail as exc:
+            print("\n  ERROR: %s\n" % exc, file=sys.stderr)
+            return 1
+
 
     try:
         print("\nBefore")
