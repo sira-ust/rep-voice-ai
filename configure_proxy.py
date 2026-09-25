@@ -148,7 +148,10 @@ def turn_on(base_url: str) -> None:
        {"platform_settings": {"overrides": {"custom_llm_extra_body": True}}})
     print("  allowed   : custom_llm_extra_body (carries the scope token)")
 
-    secret_id = ensure_secret("Bearer " + PROXY_SECRET)
+    # Bare, not "Bearer <secret>": ElevenLabs adds the scheme itself for a
+    # custom LLM. Storing it with the prefix sent "Bearer Bearer ..." and the
+    # proxy rejected every call.
+    secret_id = ensure_secret(PROXY_SECRET)
     print("  secret    : %s (%s)" % (PROXY_SECRET_NAME, secret_id))
 
     before = agent()

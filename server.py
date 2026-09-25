@@ -772,21 +772,32 @@ class Handler(BaseHTTPRequestHandler):
                                        "and LLM_PROXY_SECRET in .env"})
             return
 
-        expected = "Bearer " + LLM_PROXY_SECRET
-        if not hmac.compare_digest(self.headers.get("Authorization", ""), expected):
-            self._json(401, {"error": "Unauthorized"})
-            return
-
+        # Read the body first, always. Answering before draining it leaves the
+        # JSON sitting in the socket, and on a keep-alive connection the next
+        # read takes it for a request line -- a 401 was being followed by a
+        # baffling "Bad request syntax" containing the whole prompt.
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             length = 0
-        if length <= 0 or length > 1_000_000:
-            self._json(400, {"error": "Bad request"})
+        raw = self.rfile.read(length) if 0 < length <= 1_000_000 else b""
+
+        # ElevenLabs sends the stored secret as "Bearer <value>" for a custom
+        # LLM, so the value must be the bare token. A webhook tool's secret is
+        # the opposite -- there the stored value is the whole header -- and
+        # storing this one that way produced "Bearer Bearer ...".
+        given = self.headers.get("Authorization", "")
+        if given.startswith("Bearer "):
+            given = given[len("Bearer "):]
+        if not hmac.compare_digest(given, LLM_PROXY_SECRET):
+            self._json(401, {"error": "Unauthorized"})
             return
 
+        if not raw:
+            self._json(400, {"error": "Bad request"})
+            return
         try:
-            payload = json.loads(self.rfile.read(length).decode("utf-8"))
+            payload = json.loads(raw.decode("utf-8"))
         except ValueError:
             self._json(400, {"error": "Malformed JSON body"})
             return
@@ -799,10 +810,17 @@ class Handler(BaseHTTPRequestHandler):
         # extra body field. Anything unsigned, forged or expired is refused
         # rather than waved through -- treating a bad token as "no limit" would
         # turn every failure into full access.
-        scope_token = payload.get("scope_token") or ""
+        # ElevenLabs nests whatever the client passed as extra body under
+        # `elevenlabs_extra_body` rather than merging it into the request, so
+        # look there first. Top level too, because proxy_test.py and anything
+        # else calling this endpoint directly has no reason to nest it.
+        extra = payload.get("elevenlabs_extra_body")
+        extra = extra if isinstance(extra, dict) else {}
+        scope_token = extra.get("scope_token") or payload.get("scope_token") or ""
         rep = auth.read_scope(scope_token)
         if rep is None:
-            sys.stderr.write("  LLM proxy: refused, scope token missing or invalid\n")
+            sys.stderr.write("  LLM proxy: refused, scope token missing or invalid; "
+                             "body keys = %s\n" % sorted(payload)[:12])
             self._json(403, {"error": "A valid scope token is required."})
             return
         try:
