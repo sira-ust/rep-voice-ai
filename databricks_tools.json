@@ -210,7 +210,8 @@
       ],
       "filters": [
         "period_type = 'month'",
-        "is_current"
+        "is_current",
+        "customer_name IS NOT NULL"
       ],
       "limit": 1,
       "value_label": "account key being asked about",
@@ -253,7 +254,8 @@
       ],
       "answer_example": "They buy KYJ Pork Sausage most often — five hundred and ninety-five times, last on the eleventh of August.",
       "filters": [
-        "item_label IS NOT NULL"
+        "item_label IS NOT NULL",
+        "customer_name IS NOT NULL"
       ],
       "rep_column": "owner_rep_name"
     },
@@ -288,7 +290,8 @@
       ],
       "answer_example": "They are due for Soy Bean with Ginger Sauce, and Punjas Butter Snap Cookies are worth a mention. Want the detail on either?",
       "filters": [
-        "item_label IS NOT NULL"
+        "item_label IS NOT NULL",
+        "customer_name IS NOT NULL"
       ],
       "rep_column": "owner_rep_name"
     },
@@ -420,7 +423,10 @@
         "Which days does RED005 take deliveries?"
       ],
       "answer_example": "Red Apple Market last ordered on the twenty-second, one day ago. Twenty-three orders recently, averaging about twenty-four thousand dollars.",
-      "rep_column": "rep_name"
+      "rep_column": "rep_name",
+      "filters": [
+        "customer_name IS NOT NULL"
+      ]
     },
     {
       "name": "lookup_accounts_to_call",
@@ -440,7 +446,8 @@
         "needs_attention",
         "customer_is_active",
         "days_since_last_order IS NOT NULL",
-        "days_since_last_order <= 365"
+        "days_since_last_order <= 365",
+        "customer_name IS NOT NULL"
       ],
       "order_by": "attention_priority, days_since_last_order DESC",
       "limit": 6,
@@ -479,7 +486,10 @@
         "Who near here has gone quiet?"
       ],
       "answer_example": "Three within five kilometres. The closest that has gone quiet is a mile off and has not ordered in ninety days.",
-      "rep_column": "rep_name"
+      "rep_column": "rep_name",
+      "filters": [
+        "nearby_customer_name IS NOT NULL"
+      ]
     }
   ],
   "tbd": {
