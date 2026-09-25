@@ -664,7 +664,18 @@ def main() -> int:
     group.add_argument("--remove", metavar="NAME", help="detach and delete one tool")
     group.add_argument("--remove-all", action="store_true", help="detach and delete every configured tool")
     parser.add_argument("--count", type=int, default=8, help="rows for --sample")
+    parser.add_argument("--force", action="store_true",
+                        help="allow changing an agent not named *-test")
     args = parser.parse_args()
+
+    # One agent serves every deployment, so a mutating run reaches
+    # production unless pointed elsewhere. Reads are left alone.
+    if args.sync or args.remove or args.remove_all:
+        try:
+            common.require_test_agent("This", force=args.force)
+        except common.Fail as exc:
+            print("\n  ERROR: %s\n" % exc, file=sys.stderr)
+            return 1
 
     try:
         specs = load_specs()

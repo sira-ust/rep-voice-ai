@@ -122,7 +122,18 @@ def main() -> int:
                         help="seconds of quiet before the agent re-engages")
     parser.add_argument("--keywords", metavar="LIST",
                         help="comma-separated ASR keyword boosts")
+    parser.add_argument("--force", action="store_true",
+                        help="allow changing an agent not named *-test")
     args = parser.parse_args()
+
+    # One agent serves every deployment, so a mutating run reaches
+    # production unless pointed elsewhere. Reads are left alone.
+    if args.noisy or args.defaults or args.bvd or args.eagerness or args.turn_timeout or args.keywords:
+        try:
+            common.require_test_agent("This", force=args.force)
+        except common.Fail as exc:
+            print("\n  ERROR: %s\n" % exc, file=sys.stderr)
+            return 1
 
     try:
         print("\nBefore")

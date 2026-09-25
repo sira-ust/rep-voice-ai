@@ -16,12 +16,17 @@ edit to .env, and every script will keep using the old value. `common.py
 
 from __future__ import annotations
 
+import json
 import os
 import sys
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 ENV_FILE = ROOT / ".env"
+ENV_TEST_FILE = ROOT / ".env.test"
+APP_ENV = os.environ.get("APP_ENV", "").strip().lower()
 
 
 def _utf8_console() -> None:
@@ -70,9 +75,88 @@ def _parse(path: Path) -> dict:
 
 
 def load(path: Path | None = None) -> None:
-    """Populate os.environ from .env without overriding what is already set."""
-    for key, value in _parse(path or ENV_FILE).items():
+    """Populate os.environ from .env without overriding what is already set.
+
+    Warns when a secret in the environment differs from the one in .env. That
+    precedence is deliberate -- a systemd unit or CI must be able to override
+    the file -- but it is also how an expired token left in a shell keeps
+    winning after the file has been fixed. The failure that produces is a 403
+    from a service, pages away from the cause, and it has cost real time here.
+    """
+    values = _parse(path or ENV_FILE)
+    if path is None and APP_ENV == "test" and ENV_TEST_FILE.is_file():
+        overlay = _parse(ENV_TEST_FILE)
+        values.update(overlay)
+        sys.stderr.write("  APP_ENV=test: %s overriding %s\n"
+                         % (ENV_TEST_FILE.name, ", ".join(sorted(overlay))))
+    shadowed = []
+    for key, value in values.items():
+        current = os.environ.get(key)
+        if current is not None and current != value and key in SECRET_KEYS:
+            shadowed.append(key)
         os.environ.setdefault(key, value)
+    for key in shadowed:
+        sys.stderr.write(
+            "  WARNING: %s is set in your environment and differs from .env.\n"
+            "           The environment wins, so .env edits have no effect on it.\n"
+            "           python common.py --check  shows which source each key uses.\n" % key)
+
+
+class Fail(Exception):
+    """A problem worth telling the operator about, not a stack trace.
+
+    Each script here already has one of these; this is the shared one, so a
+    check that lives in common can be caught by whichever script called it.
+    """
+
+
+# ------------------------------------------------------------------ agent guard
+
+EL_API = "https://api.elevenlabs.io/v1"
+FORCE_PRODUCTION = os.environ.get("APP_FORCE_PRODUCTION", "").strip().lower() in (
+    "1", "true", "on")
+
+
+def agent_name(agent_id: str = "") -> str:
+    """The agent's name, or "" if it cannot be read."""
+    key = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+    agent_id = agent_id or os.environ.get("ELEVENLABS_AGENT_ID", "").strip()
+    if not (key and agent_id):
+        return ""
+    req = urllib.request.Request(
+        EL_API + "/convai/agents/" + urllib.parse.quote(agent_id),
+        headers={"xi-api-key": key, "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return json.loads(resp.read().decode()).get("name") or ""
+    except Exception:  # noqa: BLE001 - the caller decides what a failure means
+        return ""
+
+
+def require_test_agent(action: str, force: bool = False) -> str:
+    """Refuse to change an agent that is not obviously a test copy.
+
+    A workspace has one agent and every deployment points at it, so a script
+    run on a laptop rewrites production. No branch isolates that and no git
+    revert undoes it -- it has already happened here once, and the code and
+    the deployment both looked untouched while it had.
+
+    The name is the check because it is what a person reads before pressing
+    enter. A name that cannot be read counts as production: a failed lookup is
+    not evidence that this is safe.
+    """
+    if force or FORCE_PRODUCTION:
+        return agent_name()
+    name = agent_name()
+    if name.endswith("-test"):
+        return name
+    raise Fail(
+        "%s would change %s, which is not a test agent.\n"
+        "    One agent serves every deployment, so this changes production\n"
+        "    whatever branch you are on.\n"
+        "    Point ELEVENLABS_AGENT_ID at a copy named *-test, or re-run with\n"
+        "    --force if you mean it."
+        % (action, ("%r" % name) if name else "an agent whose name could not be read"))
 
 
 def mask(value: str) -> str:

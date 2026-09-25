@@ -92,7 +92,18 @@ def main() -> int:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--apply", action="store_true", help="upload agent_prompt.md")
     group.add_argument("--diff", action="store_true", help="compare local file to the agent")
+    parser.add_argument("--force", action="store_true",
+                        help="allow changing an agent not named *-test")
     args = parser.parse_args()
+
+    # One agent serves every deployment, so a mutating run reaches
+    # production unless pointed elsewhere. Reads are left alone.
+    if args.apply:
+        try:
+            common.require_test_agent("This", force=args.force)
+        except common.Fail as exc:
+            print("\n  ERROR: %s\n" % exc, file=sys.stderr)
+            return 1
 
     try:
         agent, live, live_greeting = get_prompt()
