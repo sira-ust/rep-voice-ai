@@ -193,6 +193,37 @@ def run_tool_call(name: str, value: str, rep: str = "") -> str:
         if state != "SUCCEEDED":
             return json.dumps({"error": "Databricks returned %s" % state})
         cols, rows = common.rows_of(result)
+
+        # Nothing found, on a lookup that was narrowed to one rep. Ask again
+        # without the narrowing to tell the two cases apart: a store that does
+        # not exist, and one that does but is somebody else's. They want
+        # different answers -- "I can't find that" sends a rep hunting for a
+        # spelling mistake that isn't there, when what they need to hear is
+        # whose account it is so they can hand it over.
+        #
+        # This does confirm the account exists, which silence did not. Among
+        # colleagues that is the better trade; it would not be if the audience
+        # were wider.
+        if not rows and rep and spec.get("rep_column"):
+            wider = common.run_sql(spec, value)
+            if (wider.get("status") or {}).get("state") == "SUCCEEDED":
+                other_cols, other_rows = common.rows_of(wider)
+                # Only an owned row is somebody else's. Over a third of the
+                # account rows carry no rep at all, and there are key-only
+                # rows with every other column null; both match "exists" while
+                # belonging to nobody, and calling those another rep's account
+                # would be a confident answer about a store that isn't one.
+                owner = ""
+                if other_rows and spec["rep_column"] in other_cols:
+                    owner = other_rows[0][other_cols.index(spec["rep_column"])] or ""
+                if other_rows and owner:
+                    return json.dumps({
+                        "error": "not_your_account",
+                        "owner_rep": owner,
+                        "message": ("This exists but belongs to another rep, so it is "
+                                    "outside what %s can see. Say so plainly and name "
+                                    "the rep who owns it if one is given." % (rep or "you")),
+                    })
         return json.dumps({"columns": cols, "rows": rows})
     except common.Fail as exc:
         return json.dumps({"error": str(exc)})
