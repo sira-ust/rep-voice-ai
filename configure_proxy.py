@@ -102,7 +102,9 @@ def describe(a: dict) -> None:
     url = custom.get("url") or ""
     tools = pr.get("tool_ids") or []
     mode = "proxy" if "/llm/v1" in url else "direct"
+    overrides = (a.get("platform_settings") or {}).get("overrides") or {}
     print("\n  mode      : %s" % mode)
+    print("  extra body allowed : %s" % overrides.get("custom_llm_extra_body"))
     print("  llm url   : %s" % (url or "(built-in model)"))
     print("  webhook tools attached : %d" % len(tools))
     if mode == "proxy" and tools:
@@ -128,6 +130,15 @@ def turn_on(base_url: str) -> None:
         url = url + "/llm/v1"
 
     print("\n  Pointing the agent at %s" % url)
+
+    # The scope token travels as an extra body field, and an agent refuses
+    # those unless told to allow them -- with a close code and a message the
+    # caller hears as the call simply ending. Turned on here rather than left
+    # as a step to discover by having a call drop.
+    el("/convai/agents/" + urllib.parse.quote(AGENT_ID), "PATCH",
+       {"platform_settings": {"overrides": {"custom_llm_extra_body": True}}})
+    print("  allowed   : custom_llm_extra_body (carries the scope token)")
+
     secret_id = ensure_secret("Bearer " + PROXY_SECRET)
     print("  secret    : %s (%s)" % (PROXY_SECRET_NAME, secret_id))
 
