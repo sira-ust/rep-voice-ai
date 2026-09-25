@@ -78,12 +78,6 @@
       "grain": "ranked per account, rebuilt with the pipeline",
       "not_covered": "Only some reasons rest on the account's own buying; the rest are suggestions and must be spoken as such. An account with no purchase history gets a list made entirely of new and featured items, which is a weak list, not a strong one."
     },
-    "ust_databricks.ust_reporting.mart_rep_nearby_accounts": {
-      "label": "Accounts near an account",
-      "about": "For an account a rep is standing at, the nearby accounts within a few kilometres, ranked by urgency then distance, with why each needs attention.",
-      "grain": "per anchor account, straight-line distance",
-      "not_covered": "Only accounts with coordinates appear, and distance is straight-line rather than driving. An isolated account will have no neighbours at all, which is not a failure."
-    },
     "ust_databricks.ust_facts.fct_orders": {
       "label": "Orders as submitted",
       "about": "Every order a rep submitted through the app: the account it was for, its value, how many items were on it, which channel it came through and the day it went in.",
@@ -456,33 +450,6 @@
         "Which of my accounts have gone quiet?"
       ],
       "answer_example": "Six of yours need a call. Tan Viet Oriental Food in Salina is the longest, three hundred and forty-three days, then Asian Market Grocery in Milwaukee."
-    },
-    {
-      "name": "lookup_nearby_accounts",
-      "table": "ust_databricks.ust_reporting.mart_rep_nearby_accounts",
-      "lookup_column": "anchor_customer_key",
-      "match": "exact",
-      "columns": [
-        "rep_name",
-        "nearby_customer_name",
-        "nearby_city",
-        "distance_km",
-        "attention_reason",
-        "days_since_last_order",
-        "order_value_recent",
-        "delivery_days"
-      ],
-      "order_by": "nearby_rank",
-      "limit": 6,
-      "value_label": "account key they are standing at",
-      "example": "RED005",
-      "description": "Other accounts NEAR a given account, closest and most urgent first, with how far away each is and why it needs attention. Use when a rep says they are at or near a store and asks who else is around, or who nearby has gone quiet. Needs the key of the account they are AT -- look the name up first if they gave one.",
-      "subject": "Who should I call?",
-      "sample_questions": [
-        "I'm at Red Apple Market, who else is nearby?",
-        "Who near here has gone quiet?"
-      ],
-      "answer_example": "Three within five kilometres. The closest that has gone quiet is a mile off and has not ordered in ninety days."
     }
   ],
   "tbd": {

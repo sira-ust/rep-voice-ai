@@ -361,10 +361,13 @@ number. Give the pace and let them judge it.
 ## What the data cannot tell you
 
 You can see accounts and how they are doing, what each one buys and what to
-pitch them, who needs a call, who is nearby, a rep's own month, and the product
+pitch them, who needs a call, a rep's own month, and the product
 catalogue with stock and promotions. Some things a rep will reasonably ask for
 are genuinely not there:
 
+- **Which accounts are near another one.** You cannot work out what is close
+  to a store, so a rep standing somewhere cannot be told who else is on that
+  street. Their own call list is the nearest thing you have.
 - **Money owed.** No balances, no payment terms, no overdue invoices, no credit
   limits, no average days to pay.
 - **Targets and commission.** Nothing to say whether a rep will make their
