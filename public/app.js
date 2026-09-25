@@ -23,6 +23,9 @@ const el = {
   llmNote: $("llmNote"),
   orb: $("orb"),
   modeLabel: $("modeLabel"),
+  repField: $("repField"),
+  repSelect: $("repSelect"),
+  repNote: $("repNote"),
   callBtn: $("callBtn"),
   callBtnLabel: $("callBtnLabel"),
   muteBtn: $("muteBtn"),
@@ -180,6 +183,11 @@ function clearError() {
 }
 
 /** Append a transcript bubble and return the node so it can be updated later. */
+// CJK Unified Ideographs, the Extension A block below it, and the compatibility
+// block above. Kana are deliberately absent: this asks "is this Han text", and
+// the answer decides glyph shapes, not which language the agent replied in.
+const HAN = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF]/;
+
 function addMessage(text, kind) {
   // A typed message is echoed locally; if the server also relays it back as a
   // user transcript, drop the duplicate rather than showing it twice.
@@ -193,6 +201,14 @@ function addMessage(text, kind) {
   const node = document.createElement("div");
   node.className = `msg msg-${kind}`;
   node.textContent = text;
+  // Han characters are unified across Chinese and Japanese in Unicode: the same
+  // codepoint is drawn with different strokes depending on the language, and the
+  // browser decides which using `lang`. The document is lang="en", so a Chinese
+  // reply inherits it and can be rendered in Japanese letterforms wherever the
+  // fallback font supports both. Tagging the bubble by what is actually in it
+  // keeps the agent's own detection as the only thing choosing a language --
+  // there is no picker to get out of step with.
+  if (HAN.test(text)) node.lang = "zh";
   el.transcript.appendChild(node);
   el.transcript.scrollTop = el.transcript.scrollHeight;
   return node;
@@ -220,6 +236,10 @@ function render() {
   const busy = status === "connecting" || status === "disconnecting";
   el.callBtn.classList.toggle("is-live", live);
   el.callBtn.disabled = busy;
+  // Locked for the duration of a call. The agent is told who it is speaking to
+  // once, at the start, so changing it mid-conversation would leave the picker
+  // and every answer disagreeing about whose accounts these are.
+  if (el.repSelect) el.repSelect.disabled = live || busy;
   el.callBtnLabel.textContent = live
     ? "End conversation"
     : busy
@@ -380,10 +400,18 @@ async function startConversation() {
     const auth = await getAuth(agentId, connectionType);
     log("out", "auth ok", connectionType === "websocket" ? "signedUrl" : "conversationToken");
 
+    // Who the agent takes the caller to be. The prompt reads {{rep_name}},
+    // so this must always be sent -- a referenced variable with nothing behind
+    // it fails the whole session, and "All" is a real answer here rather than
+    // a missing one.
+    const rep = el.repSelect ? el.repSelect.value : "";
+    log("out", "signed in as", rep || "All reps");
+
     state.conversation = await Conversation.startSession({
       ...auth,
       connectionType,
       textOnly: false,
+      dynamicVariables: { rep_name: rep || "All" },
 
       onConnect: ({ conversationId }) => {
         log("cb", "onConnect", conversationId);
@@ -441,7 +469,12 @@ async function startConversation() {
 
       onOutgoingEvent: (event) => {
         const type = event && event.type;
-        if (type === "user_audio_chunk") {
+        // The mic frame arrives as {user_audio_chunk: "<base64>"} with no type
+        // field, so matching on event.type never fired: every frame fell
+        // through to the generic branch and was logged whole, ~30 a second.
+        // That buried the 600-line buffer in under 20 seconds -- which is why
+        // a real error was never still on screen by the time anyone looked.
+        if (type === "user_audio_chunk" || (event && event.user_audio_chunk !== undefined)) {
           state.counts.audioSent += 1;
           if (state.counts.audioSent === 1) log("out", "FIRST mic audio chunk sent");
           if (state.counts.audioSent % 50 === 0) {
@@ -627,6 +660,54 @@ window.addEventListener("beforeunload", () => {
 });
 
 /** Render the "what can I ask" guide from the tools actually wired up. */
+function showRepNote(text) {
+  if (!el.repNote) return;
+  el.repNote.textContent = text;
+  el.repNote.hidden = false;
+}
+
+/** Fill the rep picker. Failure leaves the single "All reps" option, which
+ *  still works -- the agent simply has to ask who it is speaking to. */
+async function loadReps() {
+  if (!el.repSelect) return;
+  let data;
+  try {
+    data = await getJSON("/api/reps");
+  } catch (err) {
+    showRepNote("Could not load the rep list: " + (err.message || err));
+    return;
+  }
+  // An empty picker and a failed lookup look the same from the outside, and
+  // the person who can fix it is the one staring at the page.
+  if (!(data.reps || []).length) {
+    showRepNote("Rep list unavailable" + (data.error ? " — " + data.error : "") +
+                ". Ask as a manager, or name the rep in your question.");
+  }
+  for (const rep of data.reps || []) {
+    const option = document.createElement("option");
+    option.value = rep.name;
+    option.textContent = rep.code ? `${rep.name} (${rep.code})` : rep.name;
+    el.repSelect.appendChild(option);
+  }
+  // Survives a reload, so a rep testing a few questions is not re-picking
+  // themselves every time.
+  try {
+    const saved = localStorage.getItem("convai.rep");
+    if (saved && [...el.repSelect.options].some((o) => o.value === saved)) {
+      el.repSelect.value = saved;
+    }
+  } catch {
+    // Storage blocked; the default is fine.
+  }
+  el.repSelect.addEventListener("change", () => {
+    try {
+      localStorage.setItem("convai.rep", el.repSelect.value);
+    } catch {
+      // Not persisting is not worth telling anyone about.
+    }
+  });
+}
+
 async function loadGuide() {
   let data;
   try {
@@ -639,46 +720,52 @@ async function loadGuide() {
 
   el.guideGroups.innerHTML = "";
   const tables = [];
-
   for (const group of groups) {
-    const node = document.createElement("div");
-    node.className = "guide-group";
-
-    const head = document.createElement("div");
-    head.className = "guide-head";
-    const subject = document.createElement("span");
-    subject.className = "guide-subject";
-    subject.textContent = group.subject;
-    head.appendChild(subject);
     for (const table of group.tables || []) {
-      const tag = document.createElement("span");
-      tag.className = "guide-table";
-      tag.textContent = table.name;
-      if (table.grain) tag.title = table.grain;
-      head.appendChild(tag);
       if (!tables.includes(table.name)) tables.push(table.name);
     }
-    node.appendChild(head);
+  }
 
-    for (const table of group.tables || []) {
-      if (!table.about) continue;
-      const about = document.createElement("p");
-      about.className = "guide-about";
-      about.textContent = table.about;
-      node.appendChild(about);
-      // Saying what the data cannot answer prevents the most frustrating
-      // failure: a reasonable question that can never work.
-      if (table.notCovered) {
-        const limit = document.createElement("p");
-        limit.className = "guide-limit";
-        limit.textContent = "Not in this data: " + table.notCovered;
-        node.appendChild(limit);
-      }
-    }
+  // Two lists: what it knows about, then what asking looks like. Earlier this
+  // was a block per topic carrying its own tables, description and caveats,
+  // which was six of everything on the one screen meant to get someone talking.
+  const topics = document.createElement("div");
+  topics.className = "guide-group";
+  const topicsLabel = document.createElement("span");
+  topicsLabel.className = "guide-subject";
+  topicsLabel.textContent = "Topics";
+  topics.appendChild(topicsLabel);
 
-    const asks = document.createElement("div");
-    asks.className = "guide-asks";
-    for (const question of group.questions || []) {
+  const topicList = document.createElement("ul");
+  topicList.className = "guide-about";
+  for (const group of groups) {
+    const li = document.createElement("li");
+    li.textContent = group.subject;
+    // The tables behind a topic, what they hold and what they cannot answer:
+    // there for anyone who wants it, costing nothing to anyone who does not.
+    li.title = (group.tables || [])
+      .map((t) => [t.label || t.name, t.about,
+                   t.notCovered && "Not in this data: " + t.notCovered]
+        .filter(Boolean).join("\n"))
+      .join("\n\n");
+    topicList.appendChild(li);
+  }
+  topics.appendChild(topicList);
+  el.guideGroups.appendChild(topics);
+
+  const asking = document.createElement("div");
+  asking.className = "guide-group";
+  const askingLabel = document.createElement("span");
+  askingLabel.className = "guide-subject";
+  askingLabel.textContent = "Types of questions";
+  asking.appendChild(askingLabel);
+
+  const asks = document.createElement("div");
+  asks.className = "guide-asks";
+  // Two per topic. One left three questions standing for three broad sections,
+  // which reads as a thin tool rather than a shorthand.
+  for (const group of groups) {
+    for (const question of (group.questions || []).slice(0, 2)) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "guide-ask";
@@ -692,14 +779,58 @@ async function loadGuide() {
       });
       asks.appendChild(btn);
     }
-    node.appendChild(asks);
-    el.guideGroups.appendChild(node);
+  }
+  asking.appendChild(asks);
+
+  // What an answer sounds like, once. Spoken answers are a sentence or two,
+  // and someone expecting a table reads that as the lookup having failed.
+  const example = groups.map((g) => (g.answers || [])[0]).find(Boolean);
+  if (example) {
+    const reply = document.createElement("p");
+    reply.className = "guide-limit";
+    reply.textContent = "Answers like: \u201c" + example + "\u201d";
+    asking.appendChild(reply);
+  }
+  el.guideGroups.appendChild(asking);
+
+  // Questions the PDF asks for that nothing can answer yet. Better read here
+  // than discovered mid-call: each one is a reasonable thing for a rep to want
+  // and will stay unanswerable until the table behind it lands.
+  const tbd = data.tbd || [];
+  if (tbd.length) {
+    const block = document.createElement("div");
+    block.className = "guide-group";
+    const label = document.createElement("span");
+    label.className = "guide-subject";
+    label.textContent = "TBD — not answerable yet";
+    block.appendChild(label);
+
+    const list = document.createElement("ul");
+    list.className = "guide-about";
+    for (const item of tbd) {
+      const li = document.createElement("li");
+      li.textContent = item.question;
+      if (item.waitingOn) li.title = "Waiting on " + item.waitingOn;
+      list.appendChild(li);
+    }
+    block.appendChild(list);
+
+    const waiting = [...new Set(tbd.map((t) => t.waitingOn).filter(Boolean))];
+    if (waiting.length) {
+      const note = document.createElement("p");
+      note.className = "guide-limit";
+      note.textContent = "Waiting on " + waiting.join(", ") + ".";
+      block.appendChild(note);
+    }
+    el.guideGroups.appendChild(block);
   }
 
   if (el.guideFoot) {
+    // The gaps worth knowing before you ask, in one line rather than one per
+    // topic. Everything else about a topic is on its tooltip.
     el.guideFoot.textContent =
-      `Reading ${tables.length} table${tables.length === 1 ? "" : "s"} live. ` +
-      "Figures come from a lookup each time, never from memory.";
+      `Read live from ${tables.length} table${tables.length === 1 ? "" : "s"} ` +
+      "each time you ask, never from memory.";
   }
 }
 
@@ -782,6 +913,7 @@ async function init() {
   state.ready = Boolean(state.config.hasApiKey && el.agentIdInput.value);
   render();
   refreshAgentInfo();
+  loadReps();
   loadGuide();
 }
 

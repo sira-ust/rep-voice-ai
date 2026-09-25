@@ -245,6 +245,55 @@ def run_llm_with_tools(messages: list, model: str, max_tokens: int) -> str:
 
     return "I'm sorry, I'm having trouble finding that right now."
 
+# The rep list for the picker. Cached, because it changes about as often as
+# somebody joins the company and every sign-in would otherwise wake the
+# warehouse. Uses the warm-up token, which is read-only and separate from the
+# one the proxy above runs lookups with.
+_reps_cache: list = []
+_reps_error = ""
+_reps_fetched = 0.0
+_reps_lock = threading.Lock()
+REPS_TTL = 15 * 60
+
+
+def sales_reps() -> list:
+    """Active reps who own accounts, newest list at most REPS_TTL old."""
+    global _reps_cache, _reps_fetched
+    if not WARM_READY:
+        return []
+    with _reps_lock:
+        if _reps_cache and time.time() - _reps_fetched < REPS_TTL:
+            return _reps_cache
+    body = json.dumps({
+        "warehouse_id": DBX_WAREHOUSE,
+        "statement": ("SELECT sales_code, rep_name FROM ust_databricks.ust_dims.dim_reps "
+                      "WHERE is_active AND owns_accounts AND rep_name IS NOT NULL "
+                      "ORDER BY rep_name"),
+        "wait_timeout": "30s",
+        "on_wait_timeout": "CANCEL",
+        "disposition": "INLINE",
+        "format": "JSON_ARRAY",
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        DBX_HOST + "/api/2.0/sql/statements/", data=body, method="POST",
+        headers={"Authorization": "Bearer " + DBX_WARM_TOKEN,
+                 "Content-Type": "application/json",
+                 "User-Agent": "Mozilla/5.0 (compatible) elevenlabs-webui/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=35) as resp:
+            data = json.loads(resp.read().decode("utf-8") or "{}")
+        rows = ((data.get("result") or {}).get("data_array")) or []
+        reps = [{"code": r[0], "name": r[1]} for r in rows if len(r) > 1 and r[1]]
+    except Exception as exc:  # noqa: BLE001 - the picker degrades to "All"
+        global _reps_error
+        _reps_error = str(exc)
+        sys.stderr.write("  REPS lookup failed: %s\n" % exc)
+        return _reps_cache
+    _reps_error = ""
+    with _reps_lock:
+        _reps_cache, _reps_fetched = reps, time.time()
+    return reps
+
 
 CSP = os.environ.get("APP_CSP", "on").strip().lower() not in ("off", "0", "false")
 
@@ -264,12 +313,18 @@ _INSECURE_SET_EXPLICITLY = _INSECURE_ENV != ""
 # The browser loads the SDK from jsDelivr and talks to ElevenLabs directly, so
 # both have to be allowed. blob: is required: the SDK builds its AudioWorklet
 # from a blob URL, and revoking that permission silently kills the microphone.
+#
+# styles.css @imports Nunito from Google Fonts, which needs the stylesheet host
+# in style-src and the font files in font-src -- font-src is not inherited from
+# style-src, and without it the CSS loads while every glyph is blocked. Neither
+# failure shows up as anything but the wrong typeface.
 CSP_POLICY = (
     "default-src 'self'; "
     "script-src 'self' blob: https://cdn.jsdelivr.net; "
     "worker-src 'self' blob:; "
     "child-src 'self' blob:; "
-    "style-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    "font-src 'self' https://fonts.gstatic.com; "
     "img-src 'self' data:; "
     "media-src 'self' blob: mediastream:; "
     "connect-src 'self' https://cdn.jsdelivr.net https://api.elevenlabs.io "
@@ -512,6 +567,20 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
 
+        if route == "/api/reps":
+            # Who the caller can claim to be, until real sign-in exists. An
+            # empty list is reported with its reason: the picker falling back
+            # to "All" on its own looks identical to a company with no reps,
+            # and the difference matters to whoever has to fix it.
+            reps = sales_reps()
+            payload = {"reps": reps}
+            if not reps:
+                payload["error"] = (_reps_error or
+                                    ("DATABRICKS_WARM_TOKEN is not set" if not WARM_READY
+                                     else "no active reps returned"))
+            self._json(200, payload)
+            return
+
         if route == "/api/capabilities":
             # Built from databricks_tools.json -- the same file that defines the
             # tools -- so the guide cannot drift from what the agent can
@@ -522,8 +591,8 @@ class Handler(BaseHTTPRequestHandler):
             groups = {}
             for spec in (config.get("tools") or []):
                 subject = spec.get("subject") or "Data"
-                entry = groups.setdefault(subject, {"subject": subject,
-                                                    "tables": [], "questions": []})
+                entry = groups.setdefault(subject, {"subject": subject, "tables": [],
+                                                    "questions": [], "answers": []})
                 full = spec.get("table") or ""
                 if full and not any(t["name"] == full.split(".")[-1]
                                     for t in entry["tables"]):
@@ -538,7 +607,21 @@ class Handler(BaseHTTPRequestHandler):
                 for question in (spec.get("sample_questions") or []):
                     if question not in entry["questions"]:
                         entry["questions"].append(question)
-            self._json(200, {"groups": [g for g in groups.values() if g["questions"]]})
+                # One worked example per subject. Knowing what an answer sounds
+                # like is most of knowing whether to ask -- a caller who expects
+                # a spreadsheet and hears two sentences assumes it failed.
+                answer = spec.get("answer_example")
+                if answer and answer not in entry["answers"]:
+                    entry["answers"].append(answer)
+            # What the agent cannot answer yet, and what each is waiting on.
+            # Shown so a rep learns the limit from the page rather than from a
+            # question that fails halfway through a call.
+            tbd = []
+            for entry in ((config.get("tbd") or {}).get("waiting_on") or []):
+                for question in (entry.get("unlocks") or []):
+                    tbd.append({"question": question, "waitingOn": entry.get("table") or ""})
+            self._json(200, {"groups": [g for g in groups.values() if g["questions"]],
+                             "tbd": tbd})
             return
 
         if route == "/api/agents":
@@ -699,6 +782,11 @@ def main() -> int:
     print("  Users   : " + ", ".join(sorted(auth.users())))
     print("  Limits  : %d conversations/user/hour" % auth.token_limit())
     print("  CSP     : " + ("on" if CSP else "off"))
+    if WARM_READY:
+        found = len(sales_reps())
+        print("  Reps    : " + ("%d in the picker" % found if found
+                                else "LOOKUP FAILED (%s) -- picker shows only All"
+                                     % (_reps_error or "unknown")))
     print("  Warm-up : " + ("warehouse %s, at most every %d min"
                             % (DBX_WAREHOUSE, WARM_EVERY // 60) if WARM_READY
                             else "off (set DATABRICKS_WARM_TOKEN to enable)"))

@@ -239,10 +239,83 @@ and re-reads afterwards to confirm the change stuck.
 | Script | What it sets |
 | --- | --- |
 | [configure_llm.py](configure_llm.py) | Point the agent at a custom OpenAI-compatible LLM |
-| [configure_prompt.py](configure_prompt.py) | Upload [agent_prompt.md](agent_prompt.md) as the system prompt |
-| [configure_audio.py](configure_audio.py) | Noise filtering and turn-taking |
+| [configure_prompt.py](configure_prompt.py) | Upload [agent_prompt.md](agent_prompt.md) and [agent_greeting.txt](agent_greeting.txt) |
+| [configure_audio.py](configure_audio.py) | Noise filtering and turn-taking — see *Background speakers* below |
 | [configure_privacy.py](configure_privacy.py) | Retention, stored audio, zero-retention mode |
 | [databricks_tool.py](databricks_tool.py) | Sync the tools defined in [databricks_tools.json](databricks_tools.json) |
+
+### Background speakers
+
+The browser side is already as good as it gets: the ElevenLabs SDK requests
+`voiceIsolation`, `echoCancellation`, `noiseSuppression` and `autoGainControl`
+on the microphone, with no way to ask for more. `voiceIsolation` is the one
+that suppresses other voices in the room, and it is Chrome and Edge only —
+Firefox and Safari ignore it silently, so the same room will be noticeably
+more sensitive there.
+
+That leaves two settings on the agent, both deliberate:
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| `background_voice_detection` | `on` | ElevenLabs defaults this off |
+| `turn_eagerness` | `normal` | `eager` fired on fragments of other people's speech |
+| `turn_timeout` | `20s` | at 12s the agent's own slow generation tripped it |
+
+`eager` was set originally to shave latency, and it does — but it commits to a
+turn on the slightest speech-shaped sound, which in a shared room means
+answering someone who was not talking to it. `normal` waits for a natural
+break, costing a few hundred milliseconds a turn.
+
+`turn_timeout` is how long it waits through silence before speaking again. At
+12s it was firing during the agent's *own* pause: a call showed a tool result
+arriving at 67s and the reply not starting until 82s, so the timeout went off
+first and it asked the caller why they had gone quiet — then lost the thread of
+what it had been doing. 20s clears the gap. The real cause is how long the
+custom LLM takes to generate after a tool result, and this only stops it
+becoming a loop.
+
+```sh
+python configure_audio.py --eagerness normal   # current
+python configure_audio.py --eagerness eager    # revert if latency matters more
+python configure_audio.py --noisy              # goes further: decisive turn ends
+```
+
+These live on ElevenLabs, not in a file here, so run the command again after
+rebuilding an agent from scratch.
+
+**None of this separates speakers.** There is no diarization on the input side
+— it is one audio stream, and the filtering decides *primary voice or not*, not
+*who is talking*. For users on speakerphone in a shared room, a headset beats
+every setting above.
+
+### Adding a table
+
+Four things describe what this agent can do, and they have to move together.
+The web guide builds itself from [databricks_tools.json](databricks_tools.json)
+so it stays honest on its own, but the tools live on ElevenLabs and the prompt
+states the data's limits in prose — neither follows automatically.
+
+1. **Add the tool** to [databricks_tools.json](databricks_tools.json), with
+   `subject` and `sample_questions` so the guide has something to show.
+2. **Describe the table** in the same file's `tables` block: what it holds,
+   its grain, and what it cannot answer.
+3. **Re-read [agent_prompt.md](agent_prompt.md)** under *What the data cannot
+   tell you*, and [agent_greeting.txt](agent_greeting.txt). This is the step
+   that gets missed: a new table can make a stated limit obsolete, and the
+   agent will go on refusing questions it can now answer — a failure nobody
+   reports, because it looks like the agent working normally.
+4. **Re-read any custom guardrail** that repeats one of those limits, if
+   guardrails are enabled.
+
+```sh
+python databricks_tool.py --sync     # pushes the tools, then runs --check
+python databricks_tool.py --check    # drift only, changes nothing
+python configure_prompt.py --apply   # after editing the prompt or greeting
+```
+
+`--check` compares the file, the agent and the guide, exits non-zero if they
+disagree, and prints each table's stated limits so you can read them against
+the prompt. Steps 3 and 4 are judgement, so it reminds rather than decides.
 
 **Testing** — all of these work without a microphone.
 

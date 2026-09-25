@@ -28,6 +28,30 @@ ENV_FILE = ROOT / ".env"
 TOOLS_FILE = ROOT / "databricks_tools.json"
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) elevenlabs-webui/1.0"
 
+
+def _utf8_console() -> None:
+    """Let these scripts print non-ASCII on a Windows console.
+
+    A Windows terminal hands Python cp1252, which cannot encode much of what
+    these scripts print: a Chinese reply from the agent, or the accents and
+    punctuation store names carry out of the source system. Printing one such
+    character raises UnicodeEncodeError and takes the whole script down, so a
+    lookup returning the wrong account is not the worst case -- a crash
+    mid-listing is.
+
+    errors="replace" so an unexpected glyph degrades to a question mark
+    instead of ending the run.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            # Redirected to a pipe or replaced by a test harness: leave it be.
+            pass
+
+
+_utf8_console()
+
 # Keys whose values must never be printed.
 SECRET_KEYS = (
     "ELEVENLABS_API_KEY", "DATABRICKS_TOKEN", "DATABRICKS_WARM_TOKEN",
@@ -140,10 +164,20 @@ def statement(spec: dict) -> str:
 
     `latest_week_column` pins the query to the newest period, so a search over a
     weekly-snapshot table returns each product once rather than once per week.
+
+    `filters` are extra WHERE clauses written here and fixed in the query. They
+    are never supplied by the model -- the point of pinning the SQL is that the
+    model chooses a value, never a predicate -- so they are the place to say
+    things like "the current period only" or "active accounts only", which
+    several of these tables need before a row means what it appears to mean.
     """
     columns = spec.get("columns") or []
     select = ", ".join(columns) if columns else "*"
-    table = spec["table"]
+    # `from` lets a spec join -- the biggest-order question needs the customer's
+    # name, which lives in a different table from the order. `table` stays the
+    # one this tool is about, so the drift check and the web guide still have a
+    # single table to point at.
+    table = spec.get("from") or spec["table"]
 
     # kind "rank": the model picks a named mode from an enum instead of supplying
     # a search value. The mode selects which column to order by, through a CASE
@@ -158,10 +192,11 @@ def statement(spec: dict) -> str:
             "WHEN '%s' THEN %s" % (name, expr) for name, expr in modes.items())
         order = "CASE :lookup_value %s END ASC NULLS LAST" % branches
 
-        where = []
+        where = list(spec.get("filters") or [])
         period = spec.get("latest_week_column")
         if period:
-            where.append("%s = (SELECT MAX(%s) FROM %s)" % (period, period, table))
+            where.append("%s = (SELECT MAX(%s) FROM %s)"
+                         % (period, period, spec["table"]))
         sql = "SELECT %s FROM %s" % (select, table)
         if where:
             sql += " WHERE " + " AND ".join(where)
@@ -190,7 +225,9 @@ def statement(spec: dict) -> str:
 
     period = spec.get("latest_week_column")
     if period:
-        where.append("%s = (SELECT MAX(%s) FROM %s)" % (period, period, table))
+        where.append("%s = (SELECT MAX(%s) FROM %s)"
+                     % (period, period, spec["table"]))
+    where.extend(spec.get("filters") or [])
 
     sql = "SELECT %s FROM %s WHERE %s" % (select, table, " AND ".join(where))
     if spec.get("order_by"):

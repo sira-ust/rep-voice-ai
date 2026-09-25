@@ -191,8 +191,24 @@ def cmd_bench(spec: dict, value: str, runs: int = 3) -> None:
 # ------------------------------------------------------------------ elevenlabs wiring
 
 def ensure_secret() -> str:
-    """Store 'Bearer <token>' as a workspace secret; header values take it whole."""
+    """Store 'Bearer <token>' as a workspace secret; header values take it whole.
+
+    The token is proved against Databricks first. This is the one credential
+    that leaves the machine, and once it is at ElevenLabs the only sign it is
+    wrong is every lookup failing mid-call -- nothing here would have said so.
+    The way it goes wrong is specific: a stale DATABRICKS_TOKEN left in a shell
+    overrides .env by design, so a sync run after pasting a fresh token into
+    the file can quietly publish the dead one it replaced.
+    """
     need(DATABRICKS_TOKEN=DBX_TOKEN)
+    try:
+        run_adhoc("SELECT 1")
+    except Fail as exc:
+        raise Fail(
+            "The Databricks token does not work, so it was not sent to "
+            "ElevenLabs.\n    %s\n"
+            "    Check which value is in force -- a shell variable overrides "
+            ".env:\n      python common.py --check" % exc) from exc
     value = "Bearer " + DBX_TOKEN
     existing = elevenlabs("/convai/secrets").get("secrets", [])
     match = next((s for s in existing if s.get("name") == SECRET_NAME), None)
@@ -207,7 +223,11 @@ def ensure_secret() -> str:
 
 def tool_payload(spec: dict, secret_id: str) -> dict:
     label = spec.get("value_label") or spec["lookup_column"]
-    hint = "The exact %s to search for." % label
+    # Avoid the word "name" in this hint. The parameter object has a field
+    # called `name`, and a label like "customer name" led the model to put the
+    # store it was looking up there instead of in `value`, overriding a
+    # constant and failing the call.
+    hint = "The %s to look up. This goes in the 'value' field." % label
     if spec.get("example"):
         hint += " For example %s." % spec["example"]
 
@@ -243,7 +263,21 @@ def tool_payload(spec: dict, secret_id: str) -> dict:
                         # The only model-supplied value.
                         "parameters": {
                             "type": "array",
-                            "description": "Always exactly one element, holding the value to look up.",
+                            # Both failure modes below are ones gemma4-26b
+                            # actually produced: `parameters` sent as a bare
+                            # object rather than a list, and the looked-up value
+                            # written into `name`, overriding a constant. Each
+                            # fails the call outright, so the schema says in
+                            # words what the JSON types already say.
+                            "description": (
+                                "A JSON array -- square brackets -- holding exactly "
+                                "one object, like: "
+                                "[{\"name\": \"lookup_value\", \"type\": \"STRING\", "
+                                "\"value\": \"<what you are looking up>\"}]. "
+                                "Never send this as a bare object. Fill in 'value' "
+                                "and nothing else: 'name' and 'type' are fixed and "
+                                "must be sent exactly as shown. Putting what you are "
+                                "looking up into 'name' makes the query fail."),
                             "items": {
                                 "type": "object",
                                 "required": ["name", "value", "type"],
@@ -257,9 +291,18 @@ def tool_payload(spec: dict, secret_id: str) -> dict:
                     },
                 },
                 # Databricks' reply is verbose; show the model only the rows.
+                #
+                # total_row_count earns its place. A query matching nothing
+                # returns no data_array at all, so the model saw exactly
+                # {"status": {"state": "SUCCEEDED"}} -- a success with no
+                # contents -- and filled the silence: asked for a store that
+                # does not exist, it answered with a city and an owning rep it
+                # had invented. An explicit zero is much harder to talk past
+                # than an absent key.
                 "response_filter": {
                     "mode": "allow",
                     "filters": ["result.data_array",
+                                "manifest.total_row_count",
                                 "manifest.schema.columns.name",
                                 "status.state"],
                 },
@@ -281,6 +324,94 @@ def tool_index() -> dict:
         if name and tid:
             out[name] = tid
     return out
+
+
+def load_tables() -> dict:
+    """The `tables` block: what each table holds, and what it cannot answer."""
+    raw = json.loads(TOOLS_FILE.read_text(encoding="utf-8-sig"))
+    return (raw.get("tables") or {}) if isinstance(raw, dict) else {}
+
+
+def cmd_check(specs: list[dict]) -> int:
+    """Report anything that goes stale when a table is added or changed.
+
+    Adding a table touches more than this file. The web guide is generated
+    from it so it keeps itself honest, but the agent's tools live on
+    ElevenLabs and the prompt's claims about what the data cannot answer are
+    prose -- neither follows automatically, and a wrong claim is worse than a
+    missing one. The agent will keep refusing a question the new table just
+    made answerable, and nobody will think to look here.
+    """
+    tables = load_tables()
+    problems = []
+
+    print("\n  tools in %s : %d" % (TOOLS_FILE.name, len(specs)))
+
+    # 1. Every table a tool reads must be described, or the guide has a hole.
+    used = {s["table"] for s in specs}
+    for table in sorted(used):
+        if table not in tables:
+            problems.append("%s has no entry in the `tables` block, so the web "
+                            "guide cannot describe it" % table)
+    for table in sorted(set(tables) - used):
+        problems.append("`tables` describes %s but no tool reads it" % table)
+
+    # 2. Everything in the file must actually be on the agent.
+    if AGENT_ID and EL_KEY:
+        live = tool_index()
+        attached = set(agent_prompt(elevenlabs(
+            "/convai/agents/" + urllib.parse.quote(AGENT_ID))).get("tool_ids") or [])
+        for spec in specs:
+            tid = live.get(spec["name"])
+            if not tid:
+                problems.append("%s is in %s but does not exist on ElevenLabs "
+                                "-- run --sync" % (spec["name"], TOOLS_FILE.name))
+            elif tid not in attached:
+                problems.append("%s exists but is not attached to the agent "
+                                "-- run --sync" % spec["name"])
+        # And the other direction. A tool dropped from this file can stay
+        # attached -- the agent goes on offering a lookup nothing here
+        # describes, against a table the guide no longer mentions, which is
+        # how an answer arrives from a source nobody thought was still wired
+        # up. --sync does not always detach these, so name them.
+        configured_ids = {live.get(s["name"]) for s in specs}
+        by_id = {tid: name for name, tid in live.items()}
+        for tid in sorted(attached - configured_ids):
+            problems.append("%s is attached to the agent but is not in %s "
+                            "-- remove it with --remove %s"
+                            % (by_id.get(tid, tid), TOOLS_FILE.name,
+                               by_id.get(tid, tid)))
+        print("  attached to agent : %d" % len(attached))
+    else:
+        print("  (skipped the agent check: ELEVENLABS_* not set)")
+
+    # 3. The guide reads these; a tool without them shows up blank.
+    for spec in specs:
+        for field in ("subject", "sample_questions"):
+            if not spec.get(field):
+                problems.append("%s has no %r, so the web guide lists it with "
+                                "nothing to ask" % (spec["name"], field))
+
+    if problems:
+        print("\n  %d problem(s):" % len(problems))
+        for p in problems:
+            print("    - %s" % p)
+    else:
+        print("\n  No drift between the file, the agent and the guide.")
+
+    # The judgement call no check can make. Print the claims so they can be
+    # read against the prompt rather than remembered.
+    print("\n  ---- confirm agent_prompt.md still agrees with these ----")
+    for table, meta in sorted(tables.items()):
+        not_covered = (meta.get("not_covered") or "").strip()
+        if not_covered:
+            print("\n  %s" % (meta.get("label") or table))
+            print("    cannot answer: %s" % not_covered)
+    print("\n  A new table can make a limitation obsolete. agent_prompt.md")
+    print("  states these limits in prose under \"What the data cannot tell")
+    print("  you\" -- if a table now covers one, remove it there and from")
+    print("  agent_greeting.txt, then: python configure_prompt.py --apply\n")
+    return 1 if problems else 0
 
 
 def cmd_sync(specs: list[dict]) -> None:
@@ -326,6 +457,9 @@ def cmd_sync(specs: list[dict]) -> None:
 
     print("\n  agent now has %d tool(s)\n" % len(keep))
     cmd_list(specs)
+    # A sync is exactly when a table was added, so raise the things a sync
+    # cannot fix by itself rather than waiting to be asked.
+    cmd_check(specs)
 
 
 def cmd_list(specs: list[dict]) -> None:
@@ -384,6 +518,8 @@ def main() -> int:
     group.add_argument("--test", nargs=2, metavar=("NAME", "VALUE"), help="run one tool's query")
     group.add_argument("--bench", nargs=2, metavar=("NAME", "VALUE"), help="time one tool's query")
     group.add_argument("--sample", metavar="NAME", help="real values from a lookup column")
+    group.add_argument("--check", action="store_true",
+                       help="report drift between this file, the agent and the prompt")
     group.add_argument("--remove", metavar="NAME", help="detach and delete one tool")
     group.add_argument("--remove-all", action="store_true", help="detach and delete every configured tool")
     parser.add_argument("--count", type=int, default=8, help="rows for --sample")
@@ -399,6 +535,8 @@ def main() -> int:
             cmd_bench(find_spec(specs, args.bench[0]), args.bench[1])
         elif args.sample:
             cmd_sample(find_spec(specs, args.sample), args.count)
+        elif args.check:
+            return cmd_check(specs)
         elif args.remove:
             cmd_remove([args.remove])
         elif args.remove_all:
@@ -406,7 +544,8 @@ def main() -> int:
         else:
             print("")
             cmd_list(specs)
-            print("  --sample NAME to find real values, --sync to push changes.\n")
+            print("  --sample NAME to find real values, --sync to push changes,")
+            print("  --check to see what a new table left stale.\n")
     except Fail as exc:
         print("\n  ERROR: %s\n" % exc, file=sys.stderr)
         return 1

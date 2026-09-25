@@ -17,121 +17,496 @@
     "`subject` and `sample_questions` are shown to the person using the web UI, so they know what this agent can answer. They are not sent to the model.",
     "`tables` describes each table for the person using the web UI: what it holds, its grain, and what it cannot answer. Shown in the guide, never sent to the model.",
     "",
-    "Run `python databricks_tool.py --sync` after editing this file."
+    "",
+    "ADDING A TABLE -- four things must move together, or the agent and the",
+    "guide start describing different products:",
+    "  1. Add the tool here, with `subject` and `sample_questions` so the web",
+    "     guide has something to show.",
+    "  2. Add the table to the `tables` block above: what it holds, its grain,",
+    "     and what it cannot answer.",
+    "  3. Re-read agent_prompt.md under 'What the data cannot tell you'. A new",
+    "     table can make a stated limit obsolete, and the agent will keep",
+    "     refusing questions it can now answer. Also check agent_greeting.txt,",
+    "     which names what the agent handles. Then:",
+    "     python configure_prompt.py --apply",
+    "  4. If guardrails are enabled, re-read any custom guardrail that repeats",
+    "     one of those limits in its own words.",
+    "",
+    "Run `python databricks_tool.py --sync` after editing this file. It ends",
+    "with --check, which catches 1 and 2 and reminds you about 3 and 4."
   ],
   "tables": {
-    "ust_databricks.ust_reporting.mart_customer_weekly": {
-      "label": "Customer activity",
-      "about": "One row per customer per week, for about 2,000 accounts. Records how many orders they submitted and what those orders were worth, whether they ordered themselves or through a rep, how much friction they hit in the app, and whether they are showing a churn signal.",
-      "grain": "weekly \u2014 answers always use the most recent week",
-      "not_covered": "Which products an account ordered. Customer activity and product data are separate here, with no link between them."
+    "ust_databricks.ust_dims.dim_customers": {
+      "label": "Customer directory",
+      "about": "Every active account: name, city, county, post code, the rep who owns it, delivery days and whether an appointment is needed. This is how a store name spoken out loud becomes an account key.",
+      "grain": "one row per account, current",
+      "not_covered": "Store names repeat -- many accounts share one, and some names cover twenty-odd different stores. A name alone never identifies an account; the city and the owning rep are what separate them."
     },
-    "ust_databricks.ust_reporting.mart_item_demand_supply": {
-      "label": "Product stock and demand",
-      "about": "One row per product per week, across about 5,800 products in 69 families. Records how much stock is on hand and shippable, how many days it was out of stock, and the interest it drew \u2014 views, cart adds, and whether demand is trending.",
-      "grain": "weekly \u2014 answers always use the most recent week",
-      "not_covered": "Prices, and who bought what. Product names are abbreviated, so search by a couple of plain words rather than an exact name."
+    "ust_databricks.ust_reporting.mart_rep_account_status": {
+      "label": "Account activity and who to call",
+      "about": "One row per rep-and-account: when they last ordered, how long it has been, orders and order value recently and all time, their delivery days, and whether the account is flagged for attention and why.",
+      "grain": "current, stamped with the day it was built",
+      "not_covered": "Built from orders submitted through the app, so an account that orders by phone or email can look quiet when it is not. It also holds no invoices, returns, balances or credit terms, and nothing about which items an account buys."
+    },
+    "ust_databricks.ust_reporting.mart_rep_period_status": {
+      "label": "How a rep is doing",
+      "about": "A rep's current month: orders submitted, total and average order value, their largest order, how many accounts ordered, a projection of where the month lands at this pace, and the same figures for the month before.",
+      "grain": "current month per rep, stamped with the day it was built",
+      "not_covered": "There is no target to compare against, so it cannot say whether a rep will hit their number. No margin, no branded share, no commission. These are orders submitted, not invoiced sales, and the two never tie out exactly."
+    },
+    "ust_databricks.ust_dims.dim_items": {
+      "label": "Product catalogue",
+      "about": "Every sellable product: name, category, price, case size, what is on hand and shippable, and whether it is on promotion, new, popular or discontinued.",
+      "grain": "one row per product; stock is last night's warehouse snapshot",
+      "not_covered": "Stock covers the warehouses the WMS mirror reaches, so an unknown stock figure means we cannot see it, not that the item is out. Product names are abbreviated, so search by a couple of plain words rather than an exact name."
+    },
+    "ust_databricks.ust_reporting.mart_account_period_status": {
+      "label": "What an account was invoiced",
+      "about": "One row per account per period: invoices, invoice value, average invoice, what came back as returns and whether returns are running over threshold, against the period before.",
+      "grain": "current month per account, stamped with the day it was built",
+      "not_covered": "Invoice values only exist from late September 2026 onward -- earlier invoices were exported without amounts and never will be. Each row carries a coverage figure saying how much of it is actually priced, and most accounts are still mostly unpriced. Counts and dates are complete."
+    },
+    "ust_databricks.ust_reporting.mart_account_item_history": {
+      "label": "What an account buys",
+      "about": "One row per account and item: how many times they have bought it, when they last did, the account's own typical gap between purchases, whether they are due or overdue, and whether they appear to have stopped.",
+      "grain": "full purchase history per account-item",
+      "not_covered": "Due and overdue are judged against that account's own rhythm, not a company threshold, so a quarterly buyer is not overdue after a month. Value is subject to the same late-2026 pricing gap as invoices."
+    },
+    "ust_databricks.ust_reporting.mart_account_item_opportunities": {
+      "label": "What to pitch an account",
+      "about": "A ranked list of items to raise with an account, each carrying the reason it made the list -- due to reorder, stopped buying, on promotion, peers buy it, or new and featured -- and the evidence behind it, with stock and promotion terms.",
+      "grain": "ranked per account, rebuilt with the pipeline",
+      "not_covered": "Only some reasons rest on the account's own buying; the rest are suggestions and must be spoken as such. An account with no purchase history gets a list made entirely of new and featured items, which is a weak list, not a strong one."
+    },
+    "ust_databricks.ust_reporting.mart_rep_nearby_accounts": {
+      "label": "Accounts near an account",
+      "about": "For an account a rep is standing at, the nearby accounts within a few kilometres, ranked by urgency then distance, with why each needs attention.",
+      "grain": "per anchor account, straight-line distance",
+      "not_covered": "Only accounts with coordinates appear, and distance is straight-line rather than driving. An isolated account will have no neighbours at all, which is not a failure."
+    },
+    "ust_databricks.ust_facts.fct_orders": {
+      "label": "Orders as submitted",
+      "about": "Every order a rep submitted through the app: the account it was for, its value, how many items were on it, which channel it came through and the day it went in.",
+      "grain": "one row per order, same day",
+      "not_covered": "Only orders placed through the app. An account that phones or emails its orders does not appear here, and these are orders as submitted rather than what was finally invoiced, so they will not tie out with invoice figures."
+    },
+    "ust_databricks.ust_reporting.mart_rep_period_item_mix": {
+      "label": "What a month was made of",
+      "about": "A rep's invoiced month broken down: lines, distinct items and categories, the share that were promotional or new items, and the rate at which lines came back.",
+      "grain": "current month per rep, stamped with the day it was built",
+      "not_covered": "Share of lines is sound; share of value rests on the same late-2026 pricing gap as everything else, and across the reps only about fifteen percent of lines are priced, so read the coverage figure before quoting a value share. There is no branded share here -- that needs a table that has not landed."
     }
   },
   "tools": [
     {
-      "name": "lookup_customer_week",
-      "table": "ust_databricks.ust_reporting.mart_customer_weekly",
-      "lookup_column": "customer_key",
+      "name": "lookup_rep_month",
+      "table": "ust_databricks.ust_reporting.mart_rep_period_status",
+      "lookup_column": "rep_name",
+      "match": "contains",
       "columns": [
-        "customer_key",
-        "week_start",
         "orders_submitted",
         "order_value_total",
-        "churn_signal",
-        "service_mode"
+        "order_value_avg",
+        "accounts_ordered",
+        "order_value_largest",
+        "order_value_projected",
+        "prev_order_value_total",
+        "order_value_change_pct",
+        "as_of_date"
       ],
-      "order_by": "week_start DESC",
+      "filters": [
+        "period_type = 'month'",
+        "is_current"
+      ],
       "limit": 1,
-      "value_label": "customer key",
-      "example": "RED005",
-      "description": "Look up ONE CUSTOMER's most recent weekly activity by their customer key, for example RED005. Use this for questions about how a customer is doing, how many orders they placed, their order value, or whether they are at risk of churning. Do not use this for products, parts or stock.",
-      "subject": "Customers",
+      "value_label": "rep being asked about",
+      "example": "Ken Tov",
+      "description": "How ONE REP is doing this month, by their name. Use for a rep asking about their own performance -- orders submitted, total and average order value, their biggest order, how many accounts ordered, where they are on pace to land by month end, and how that compares with last month. This is the rep's own numbers, not one account's: for a single store use lookup_account_status.",
+      "subject": "How am I doing?",
       "sample_questions": [
-        "How is customer RED005 doing?",
-        "Did POT001 order anything last week?",
-        "Is ACM001 at risk of churning?"
+        "How am I doing this month?",
+        "How does that compare to last month?",
+        "Where will I land by month end?"
+      ],
+      "answer_example": "A hundred and fifty-six orders so far this month, about two million dollars, across seventy-seven accounts. At this pace you land near two point seven."
+    },
+    {
+      "name": "lookup_biggest_orders",
+      "table": "ust_databricks.ust_facts.fct_orders",
+      "from": "ust_databricks.ust_facts.fct_orders o JOIN ust_databricks.ust_dims.dim_customers c ON o.customer_key = c.customer_key JOIN ust_databricks.ust_dims.dim_reps r ON o.sales_code = r.sales_code",
+      "lookup_column": "r.rep_name",
+      "match": "contains",
+      "columns": [
+        "c.customer_name",
+        "c.city",
+        "o.grand_total",
+        "o.total_item_count",
+        "o.order_channel",
+        "o.submitted_date"
+      ],
+      "filters": [
+        "o.submitted_date >= date_trunc('month', current_date())"
+      ],
+      "order_by": "o.grand_total DESC",
+      "limit": 5,
+      "value_label": "rep whose orders to list",
+      "example": "Ryan Tran",
+      "description": "ONE REP's biggest orders this month, largest first, each WITH THE CUSTOMER that placed it, how many items were on it, which channel it came through and the date. Use when a rep asks about their biggest or largest order, who it was from, or how their orders split across channels. Requires the rep's name. For their month as a whole -- totals, averages, pace -- use lookup_rep_month.",
+      "subject": "How am I doing?",
+      "sample_questions": [
+        "What is my largest order and which customer?",
+        "Which of my orders came through the app?"
+      ],
+      "answer_example": "Your biggest was fifty nine thousand three hundred and thirty four dollars, from Asian Food Store in Appleton, four hundred and ninety seven items, through the PDA on the second."
+    },
+    {
+      "name": "lookup_rep_month_mix",
+      "table": "ust_databricks.ust_reporting.mart_rep_period_item_mix",
+      "lookup_column": "rep_name",
+      "match": "contains",
+      "columns": [
+        "invoice_lines",
+        "distinct_items",
+        "distinct_categories",
+        "promo_line_share",
+        "new_item_line_share",
+        "return_line_rate",
+        "as_of_date"
+      ],
+      "filters": [
+        "period_type = 'month'",
+        "is_current"
+      ],
+      "limit": 1,
+      "value_label": "rep whose mix to break down",
+      "example": "Ryan Tran",
+      "description": "What ONE REP's month was MADE OF: how many invoice lines and distinct items and categories, and the share of LINES that were promotional or new items, plus the rate at which lines came back. Shares here are by line, not by value -- too little of the invoice history carries a price for a value share to mean anything, so if someone asks for the split by value, say it is by line and that value coverage is too thin to divide up. These are invoiced lines, not orders submitted: for order counts, totals and pace use lookup_rep_month, and for individual orders use lookup_biggest_orders.",
+      "subject": "How am I doing?",
+      "sample_questions": [
+        "What was my month made of?",
+        "How much of my month was promo or new items?"
+      ],
+      "answer_example": "Two thousand and ninety-eight lines across thirteen hundred items and ten categories. Promotions were about four percent of lines, new items about six."
+    },
+    {
+      "name": "lookup_account_invoiced",
+      "table": "ust_databricks.ust_reporting.mart_account_period_status",
+      "lookup_column": "customer_key",
+      "match": "exact",
+      "columns": [
+        "customer_name",
+        "period_start",
+        "as_of_date",
+        "invoice_count",
+        "invoice_value",
+        "value_coverage",
+        "invoice_value_avg",
+        "returned_value",
+        "return_rate_value",
+        "return_rate_is_measurable",
+        "returns_over_threshold",
+        "prev_invoice_value",
+        "invoice_value_change_pct"
+      ],
+      "filters": [
+        "period_type = 'month'",
+        "is_current"
+      ],
+      "limit": 1,
+      "value_label": "account key being asked about",
+      "example": "RED005",
+      "description": "What ONE account was actually INVOICED this month, and what came back as returns. Use for what a store really bought, their invoice value, how it compares with last month, and whether returns are running high. This is posted invoices, which is different from orders submitted -- for order activity and when they last ordered use lookup_account_status instead.",
+      "subject": "How am I doing?",
+      "sample_questions": [
+        "What did Red Apple Market buy last month?",
+        "How are returns looking for that account?"
+      ],
+      "answer_example": "Five invoices this month. Only part of that is priced in our data, so I can give you the count with confidence but not the full value."
+    },
+    {
+      "name": "lookup_account_top_items",
+      "table": "ust_databricks.ust_reporting.mart_account_item_history",
+      "lookup_column": "customer_key",
+      "match": "exact",
+      "columns": [
+        "item_label",
+        "item_category_name",
+        "times_purchased",
+        "last_purchase_date",
+        "days_since_last_purchase",
+        "median_days_between_purchases",
+        "reorder_status",
+        "avg_quantity_per_purchase",
+        "primary_quantity_uom",
+        "is_in_stock"
+      ],
+      "order_by": "times_purchased DESC",
+      "limit": 8,
+      "value_label": "account key being asked about",
+      "example": "RED005",
+      "description": "What ONE account actually buys, item by item, most often first. Use for what a store orders, how often they take it, and when they last did. This is their purchase history -- for what to PITCH them next use lookup_pitch_list, which ranks by opportunity rather than by how often they have bought.",
+      "subject": "What should I sell them?",
+      "sample_questions": [
+        "What does Red Apple Market usually buy?",
+        "What are their top items?"
+      ],
+      "answer_example": "They buy KYJ Pork Sausage most often — five hundred and ninety-five times, last on the eleventh of August.",
+      "filters": [
+        "item_label IS NOT NULL"
       ]
     },
     {
-      "name": "lookup_item_supply",
-      "table": "ust_databricks.ust_reporting.mart_item_demand_supply",
-      "lookup_column": "prtnum",
+      "name": "lookup_pitch_list",
+      "table": "ust_databricks.ust_reporting.mart_account_item_opportunities",
+      "lookup_column": "customer_key",
+      "match": "exact",
       "columns": [
-        "prtnum",
-        "item_name",
-        "week_start",
-        "shippable_eow",
-        "avg_on_hand_qty",
-        "days_out_of_stock",
-        "signal"
+        "item_label",
+        "opportunity_reason",
+        "is_evidence_based",
+        "opportunity_evidence",
+        "days_overdue",
+        "is_in_stock",
+        "shippable_qty",
+        "is_on_promotion",
+        "promo_buy_qty",
+        "promo_free_qty",
+        "promo_end_date",
+        "unit_price"
       ],
-      "order_by": "week_start DESC",
+      "order_by": "opportunity_rank",
+      "limit": 6,
+      "value_label": "account key being asked about",
+      "example": "RED005",
+      "description": "What to walk in and TALK ABOUT with ONE account: items ranked by opportunity, each with the reason it made the list and the evidence behind it. Use when a rep asks what to sell, pitch, recommend or bring up with a store. Every row says whether it is evidence based -- built on that account's own buying -- or only a suggestion, and those two must be said differently.",
+      "subject": "What should I sell them?",
+      "sample_questions": [
+        "What should I sell Red Apple Market?",
+        "What should I talk to them about?"
+      ],
+      "answer_example": "They are due for Soy Bean with Ginger Sauce, and Punjas Butter Snap Cookies are worth a mention. Want the detail on either?",
+      "filters": [
+        "item_label IS NOT NULL"
+      ]
+    },
+    {
+      "name": "search_items",
+      "table": "ust_databricks.ust_dims.dim_items",
+      "lookup_column": "item_label",
+      "match": "all_words",
+      "columns": [
+        "item_no",
+        "item_label",
+        "item_category_name",
+        "unit_price",
+        "is_in_stock",
+        "shippable_qty",
+        "is_on_promotion",
+        "is_new_item",
+        "is_popular_item",
+        "stock_snapshot_date"
+      ],
+      "filters": [
+        "is_sellable",
+        "NOT is_blocked"
+      ],
+      "order_by": "is_in_stock DESC, is_popular_item DESC",
+      "limit": 6,
+      "value_label": "product being asked about",
+      "example": "coconut milk",
+      "description": "Find PRODUCTS by what they are called. Use when someone asks whether we carry something, what brands or sizes there are, or what is in stock, and they have named the product rather than given a part number. Send two or three plain English words. Returns the item number, price, stock and whether it is on promotion. Nothing to do with customers or accounts.",
+      "subject": "What should I sell them?",
+      "sample_questions": [
+        "Do we carry coconut milk?",
+        "What jasmine rice do we stock?",
+        "Anything on promotion in oyster sauce?"
+      ],
+      "answer_example": "Several — DF Coconut Milk, Aroy D and Chaokoh. Want stock on one of them?"
+    },
+    {
+      "name": "lookup_item",
+      "table": "ust_databricks.ust_dims.dim_items",
+      "lookup_column": "item_no",
+      "match": "exact",
+      "columns": [
+        "item_label",
+        "item_category_name",
+        "unit_price",
+        "is_in_stock",
+        "shippable_qty",
+        "on_hand_qty",
+        "stock_snapshot_date",
+        "is_on_promotion",
+        "promo_price",
+        "promo_buy_qty",
+        "promo_free_qty",
+        "promo_end_date",
+        "case_qty",
+        "base_uom",
+        "is_discontinued"
+      ],
       "limit": 1,
       "value_label": "part number",
       "example": "11050",
-      "description": "Look up ONE PRODUCT's most recent weekly stock and demand by its part number. Use this for questions about availability, how much of an item is in stock or shippable, or whether an item has been out of stock recently. Do not use this for customers or sales reps.",
-      "subject": "Products",
+      "description": "ONE product by its exact part number. Use when a caller reads out a number rather than a name. Returns stock on hand and shippable, price, case size, any live promotion and whether the item is discontinued. If they described the product in words instead, use search_items.",
+      "subject": "What should I sell them?",
       "sample_questions": [
-        "How much of part number 11050 can we ship?",
-        "Has Chaokoh coconut milk been out of stock recently?"
-      ]
-    },
-    {
-      "name": "search_items_by_name",
-      "table": "ust_databricks.ust_reporting.mart_item_demand_supply",
-      "lookup_column": "item_name",
-      "match": "all_words",
-      "latest_week_column": "week_start",
-      "columns": [
-        "prtnum",
-        "item_name",
-        "shippable_eow"
+        "Is part 11050 in stock?",
+        "What's the promo on 11050?"
       ],
-      "order_by": "shippable_eow DESC",
-      "limit": 6,
-      "value_label": "product name or keyword",
-      "example": "oyster sauce",
-      "description": "Search the product catalogue by product name when the caller does not know the part number. Pass only the two or three words that identify the product, in their normal English spelling and singular form -- for example send 'pad thai noodle' for \"do you have any PadThai noodles?\", or 'oyster sauce' for \"what oyster sauces do we carry?\". Drop filler words such as 'any', 'some', 'do we have'; every word you send must appear in the product name. If the search returns nothing, try again with fewer or more general words (send 'noodle' instead of 'pad thai noodle') before telling the caller you found nothing. Returns up to six products with part numbers and how many units are shippable. Use this to answer whether we carry something, or which brands we stock. If the caller already gave a part number, use lookup_item_supply instead.",
-      "subject": "Products",
-      "sample_questions": [
-        "Do we carry oyster sauce? What brands?",
-        "Do you have pad thai noodles?",
-        "What jasmine rice do we stock?"
-      ]
+      "answer_example": "Four thousand six hundred and eighty units of Golden Corn on Cob, as of last night."
     },
     {
-      "name": "rank_customers",
-      "kind": "rank",
-      "table": "ust_databricks.ust_reporting.mart_customer_weekly",
-      "latest_week_column": "week_start",
+      "name": "find_customer_by_name",
+      "table": "ust_databricks.ust_dims.dim_customers",
+      "lookup_column": "customer_name",
+      "match": "all_words",
       "columns": [
         "customer_key",
-        "orders_submitted",
-        "order_value_total",
-        "churn_signal"
+        "customer_name",
+        "city",
+        "post_code",
+        "owner_rep_name"
       ],
-      "modes": {
-        "top_by_order_value": "-order_value_total",
-        "lowest_by_order_value": "order_value_total",
-        "top_by_orders": "-CAST(orders_submitted AS DOUBLE)",
-        "lowest_by_orders": "CAST(orders_submitted AS DOUBLE)"
-      },
-      "limit": 5,
-      "value_label": "ranking mode",
-      "example": "top_by_order_value",
-      "description": "Rank customers for the most recent week. Use this when the caller asks about customers as a group rather than one named account -- best, worst, busiest, quietest, highest or lowest spending. Decide which ranking they mean and pass exactly one of: top_by_order_value, lowest_by_order_value, top_by_orders, lowest_by_orders. Returns five customers. If the caller named a specific customer key, use lookup_customer_week instead.",
-      "subject": "Customers",
+      "filters": [
+        "is_active",
+        "NOT is_test_account"
+      ],
+      "order_by": "customer_name",
+      "limit": 6,
+      "value_label": "store or account being asked about",
+      "example": "asian market",
+      "description": "Find a customer's account key from the name a caller said out loud. Use this FIRST whenever someone names a store rather than giving a key. Returns every active account matching those words with its city, post code and owning rep, because store names repeat -- many accounts share a name. Read the city and owner back and ask which one they mean before looking anything else up. Do not use this for products.",
+      "subject": "Who should I call?",
       "sample_questions": [
-        "Which accounts are spending the most?",
-        "Who are my busiest customers?",
-        "Which accounts have gone quiet?"
-      ]
+        "How is Asian Market doing?",
+        "Look up Lee's Sandwiches"
+      ],
+      "answer_example": "I found one Red Apple Market in Anchorage, owned by Tech Tov. Would you like their recent activity?"
+    },
+    {
+      "name": "lookup_account_status",
+      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
+      "lookup_column": "customer_key",
+      "match": "exact",
+      "columns": [
+        "customer_name",
+        "city",
+        "rep_name",
+        "last_order_date",
+        "days_since_last_order",
+        "orders_recent",
+        "order_value_recent",
+        "order_value_avg",
+        "orders_all_time",
+        "delivery_days",
+        "appointment_required",
+        "attention_reason",
+        "as_of_date"
+      ],
+      "order_by": "days_since_last_order",
+      "limit": 1,
+      "value_label": "customer key",
+      "example": "RED005",
+      "description": "How ONE account is doing, by its customer key. Use for how an account is performing, when they last ordered, how long it has been, their recent order value, which days they accept deliveries and whether they need attention. If the caller gave a name instead of a key, run find_customer_by_name first. Do not use this for products or for a rep's own numbers.",
+      "subject": "Who should I call?",
+      "sample_questions": [
+        "How is RED005 doing?",
+        "When did RED005 last order?",
+        "Which days does RED005 take deliveries?"
+      ],
+      "answer_example": "Red Apple Market last ordered on the twenty-second, one day ago. Twenty-three orders recently, averaging about twenty-four thousand dollars."
+    },
+    {
+      "name": "lookup_accounts_to_call",
+      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
+      "lookup_column": "rep_name",
+      "match": "contains",
+      "columns": [
+        "customer_name",
+        "city",
+        "customer_key",
+        "days_since_last_order",
+        "order_value_recent",
+        "attention_reason",
+        "delivery_days"
+      ],
+      "filters": [
+        "needs_attention",
+        "customer_is_active",
+        "days_since_last_order IS NOT NULL",
+        "days_since_last_order <= 365"
+      ],
+      "order_by": "attention_priority, days_since_last_order DESC",
+      "limit": 6,
+      "value_label": "rep whose accounts to list",
+      "example": "Ryan Tran",
+      "description": "Which of ONE REP's OWN accounts need a call, most urgent first. Requires the rep's name: these are their accounts, nobody else's, so never call this without knowing who you are speaking to -- ask first. Use when a rep asks who to call or visit, who has gone quiet, or which of their accounts need attention. Covers accounts seen within the last year. For one named store use lookup_account_status; for accounts near where they are standing use lookup_nearby_accounts.",
+      "subject": "Who should I call?",
+      "sample_questions": [
+        "Which customers should I visit first today?",
+        "Which of my accounts have gone quiet?"
+      ],
+      "answer_example": "Six of yours need a call. Tan Viet Oriental Food in Salina is the longest, three hundred and forty-three days, then Asian Market Grocery in Milwaukee."
+    },
+    {
+      "name": "lookup_nearby_accounts",
+      "table": "ust_databricks.ust_reporting.mart_rep_nearby_accounts",
+      "lookup_column": "anchor_customer_key",
+      "match": "exact",
+      "columns": [
+        "nearby_customer_name",
+        "nearby_city",
+        "distance_km",
+        "attention_reason",
+        "days_since_last_order",
+        "order_value_recent",
+        "delivery_days"
+      ],
+      "order_by": "nearby_rank",
+      "limit": 6,
+      "value_label": "account key they are standing at",
+      "example": "RED005",
+      "description": "Other accounts NEAR a given account, closest and most urgent first, with how far away each is and why it needs attention. Use when a rep says they are at or near a store and asks who else is around, or who nearby has gone quiet. Needs the key of the account they are AT -- look the name up first if they gave one.",
+      "subject": "Who should I call?",
+      "sample_questions": [
+        "I'm at Red Apple Market, who else is nearby?",
+        "Who near here has gone quiet?"
+      ],
+      "answer_example": "Three within five kilometres. The closest that has gone quiet is a mile off and has not ordered in ninety days."
     }
-  ]
+  ],
+  "tbd": {
+    "_comment": "Questions from the 9/8/2026 PDF that no built table answers. Shown in the web guide so a rep knows not to ask, rather than finding out mid-call. Each waits on a NAV table not yet exported to Databricks.",
+    "waiting_on": [
+      {
+        "table": "Salesperson Target",
+        "unlocks": [
+          "Will I hit my target this month?",
+          "How much more do I need for the rest of the month?",
+          "Am I ahead or behind for this point in the month?",
+          "How does this compare with the same month last year?"
+        ]
+      },
+      {
+        "table": "Customer Outstanding Balance",
+        "unlocks": [
+          "Which accounts are past their terms?",
+          "What are my average AR days?"
+        ]
+      },
+      {
+        "table": "Sales Person Margin History",
+        "unlocks": [
+          "What share of my sales is branded?"
+        ]
+      },
+      {
+        "table": "Salesperson_Purchaser",
+        "unlocks": [
+          "What AR, brand and margin targets am I measured against?"
+        ]
+      }
+    ]
+  }
 }

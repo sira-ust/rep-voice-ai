@@ -1,31 +1,78 @@
+/* ============================================================
+   AI Voice · PDA 2.0 Theme
+   Remaps the original AI Voice dark theme onto the official PDA 2.0
+   design language. Selectors/class names are identical to the original
+   file, so this can drop in as a direct replacement — no HTML/JS changes.
+
+   A few decisions here weren't directly covered by the confirmed PDA 2.0
+   token set, and were confirmed with the user before building:
+   1. PDA's palette has no "connected/success" green (only blue #2196F3,
+      pressed-blue #1877D2, navy #3366AD, alert red #D6584F). Per the user's
+      choice, "connected" reuses PDA blue directly (--live). The voice orb's
+      "listening" state uses navy instead, so it stays visually distinct
+      from the "speaking" (blue) state.
+   2. Nunito loads via a Google Fonts @import at the top of this file. That
+      CDN can be blocked on mainland China networks; when it is, the system
+      font stack below takes over automatically with no visual breakage.
+   3. The debug log panel was converted to the same light-card style as the
+      rest of the UI (per the user's choice).
+   4. --warn (used for the "connecting" state and read-only hints) isn't in
+      the confirmed PDA token set either. Kept the original value #E8B45C,
+      which is close in spirit to the amber used for PDA's "overdue /
+      needs attention" customer reminder badges. Swap this one variable if
+      PDA later locks an official amber value.
+   ============================================================ */
+
+/* Nunito is the PDA 2.0 standard typeface. Google Fonts can be blocked on
+   mainland China networks; when blocked, the system font stack in
+   font-family takes over automatically and nothing breaks. */
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap');
+
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 
-  --bg: #08090d;
-  --bg-glow: #151a33;
-  --surface: #101219;
-  --surface-2: #161923;
-  --surface-3: #1c202c;
-  --line: #22262f;
-  --line-bright: #2f3542;
+  /* ---------- Confirmed PDA 2.0 tokens (from shell-and-tokens reference) ---------- */
+  --pda-blue: #2196F3;      /* primary action color: main buttons, active state, listen/reply entry */
+  --pda-blue-d: #1877D2;    /* pressed state: primary color darkened — never use anything but darkening for "pressed" */
+  --pda-navy: #3366AD;      /* deep accent: summary bars, strong emphasis; also used here to separate the "listening" state */
+  --pda-ink: #1A2A3A;       /* body text: dark navy-charcoal, never pure black */
+  --pda-muted: #8A97A6;     /* secondary text */
+  --pda-line: #E3E9F0;      /* hairline dividers / card borders */
+  --pda-bg: #F4F7FB;        /* list / page background */
+  --pda-strip: #E4E9EF;     /* input-row strip background (used here for input containers) */
+  --pda-gray-row: #EDF0F3;  /* disabled / secondary row background (used here for secondary cards, bubbles, debug panel) */
+  --pda-gray-text: #9AA6B2; /* text on disabled rows */
+  --pda-red: #D6584F;       /* alert / danger */
+  --pda-white: #fff;
 
-  --text: #eceef4;
-  --text-2: #a3abbd;
-  --text-3: #6f7789;
+  /* ---------- Mapped onto the original variable names, semantics unchanged ---------- */
+  --bg: var(--pda-bg);
+  --bg-glow: #E9EEF6;       /* light-theme top glow, replacing the dark theme's starfield glow */
+  --surface: var(--pda-white);
+  --surface-2: var(--pda-strip);
+  --surface-3: var(--pda-gray-row);
+  --line: var(--pda-line);
+  --line-bright: #C7D3E3;   /* not in the PDA token set; one step darker than --line, for hover/focus borders */
 
-  --accent: #6b7cff;
-  --accent-hot: #8290ff;
-  --accent-soft: rgba(107, 124, 255, 0.14);
-  --live: #35d29a;
-  --danger: #f2626f;
-  --warn: #e8b45c;
+  --text: var(--pda-ink);
+  --text-2: var(--pda-muted);
+  --text-3: #A9B3C0;        /* not in the PDA token set; one step lighter than --muted, for tertiary/meta text */
 
-  --r-sm: 8px;
-  --r-md: 11px;
-  --r-lg: 16px;
+  --accent: var(--pda-blue);
+  --accent-hot: #4DA8F5;    /* PDA has no defined "brighter" state; one step lighter than --accent for hover/emphasis */
+  --accent-soft: rgba(33, 150, 243, 0.14);
+  --live: var(--pda-blue);        /* connected state: reuses PDA blue directly per the user's choice, no new hue introduced */
+  --listen: var(--pda-navy);      /* listening state: PDA has no green, so navy differentiates it from "speaking" */
+  --danger: var(--pda-red);
+  --warn: #E8B45C;                /* not an officially confirmed PDA color — see file header note */
+  --warn-text: #92660E;           /* readable dark variant of --warn for text on light backgrounds */
+
+  --r-sm: 10px;
+  --r-md: 14px;   /* matches PDA button/input radius */
+  --r-lg: 18px;   /* matches PDA card/dialog radius */
   --r-xl: 22px;
 
-  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font: "Nunito", ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
@@ -84,13 +131,15 @@ body {
   display: grid;
   place-items: center;
   color: #fff;
-  background: linear-gradient(150deg, var(--accent-hot), #4b5ad4);
-  box-shadow: 0 3px 14px -4px rgba(107, 124, 255, 0.9);
+  /* PDA action-button standard: solid fill + soft shadow, not the heavy-contrast
+     gradient the dark theme used */
+  background: var(--accent);
+  box-shadow: 0 3px 10px -3px rgba(33, 150, 243, 0.55);
 }
 
 .brand-name {
   font-size: 14.5px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: -0.01em;
   white-space: nowrap;
   overflow: hidden;
@@ -113,6 +162,7 @@ body {
   border-radius: 999px;
   padding: 5px 12px 5px 10px;
   font-size: 12.5px;
+  font-weight: 600;
   color: var(--text-2);
   white-space: nowrap;
 }
@@ -133,7 +183,7 @@ body {
 
 .status-pill .dot.connected {
   background: var(--live);
-  box-shadow: 0 0 0 3px rgba(53, 210, 154, 0.18);
+  box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.18);
 }
 
 .status-pill .dot.disconnecting { background: var(--danger); }
@@ -141,6 +191,8 @@ body {
 @keyframes blink { 50% { opacity: 0.3; } }
 
 /* ---------- buttons ---------- */
+/* PDA standard: action buttons are solid fill + soft shadow; pressed state is
+   only ever a color darkening, never a hover gradient */
 
 .icon-btn {
   background: var(--surface);
@@ -158,17 +210,17 @@ body {
 }
 
 .icon-btn:hover:not(:disabled) { color: var(--text); border-color: var(--line-bright); }
-.icon-btn:disabled { opacity: 0.35; cursor: default; }
+.icon-btn:disabled { opacity: 0.4; cursor: default; }
 
 .icon-btn.active {
   color: var(--danger);
-  border-color: rgba(242, 98, 111, 0.45);
-  background: rgba(242, 98, 111, 0.12);
+  border-color: rgba(214, 88, 79, 0.4);
+  background: rgba(214, 88, 79, 0.1);
 }
 
 .btn {
   font: inherit;
-  font-weight: 560;
+  font-weight: 700;
   border-radius: 999px;
   border: 1px solid transparent;
   cursor: pointer;
@@ -179,27 +231,31 @@ body {
   transition: background 0.15s, border-color 0.15s, transform 0.08s, box-shadow 0.2s;
 }
 
-.btn:active:not(:disabled) { transform: scale(0.98); }
-.btn:disabled { opacity: 0.45; cursor: default; }
+.btn:active:not(:disabled) { transform: scale(0.97); }
+.btn:disabled { opacity: 0.4; cursor: default; }
 
 .btn-primary {
-  background: linear-gradient(180deg, var(--accent-hot), var(--accent));
+  /* PDA solidbtn spec: solid blue + soft blue shadow; pressed state swaps
+     straight to --blue-d, no gradient involved */
+  background: var(--accent);
   color: #fff;
   padding: 12px 28px;
   font-size: 14.5px;
-  box-shadow: 0 8px 26px -10px rgba(107, 124, 255, 0.95);
+  font-weight: 800;
+  box-shadow: 0 8px 18px -8px rgba(33, 150, 243, 0.55);
 }
 
-.btn-primary:hover:not(:disabled) { background: var(--accent-hot); }
+.btn-primary:hover:not(:disabled) { background: var(--accent); }
+.btn-primary:active:not(:disabled) { background: var(--pda-blue-d); box-shadow: none; }
 
 .btn-primary.is-live {
-  background: rgba(242, 98, 111, 0.12);
-  color: #ff9aa3;
-  border-color: rgba(242, 98, 111, 0.4);
+  background: rgba(214, 88, 79, 0.1);
+  color: #B23A30;
+  border-color: rgba(214, 88, 79, 0.4);
   box-shadow: none;
 }
 
-.btn-primary.is-live:hover:not(:disabled) { background: rgba(242, 98, 111, 0.2); }
+.btn-primary.is-live:hover:not(:disabled) { background: rgba(214, 88, 79, 0.18); }
 
 .btn-ghost {
   background: var(--surface-3);
@@ -207,6 +263,7 @@ body {
   color: var(--text);
   padding: 9px 17px;
   font-size: 13.5px;
+  font-weight: 700;
 }
 
 .btn-ghost:hover:not(:disabled) { border-color: var(--line-bright); }
@@ -226,9 +283,11 @@ body {
   border-radius: var(--r-md);
   font-size: 13px;
   line-height: 1.45;
-  background: rgba(242, 98, 111, 0.09);
-  border: 1px solid rgba(242, 98, 111, 0.3);
-  color: #ffb0b7;
+  background: rgba(214, 88, 79, 0.08);
+  border: 1px solid rgba(214, 88, 79, 0.28);
+  /* On a light background the text needs to be dark — the dark theme's
+     light-pink text would be nearly invisible on white */
+  color: #B23A30;
 }
 
 .banner-icon { flex: none; margin-top: 1px; opacity: 0.9; }
@@ -269,7 +328,7 @@ body {
 
 .field label {
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-3);
@@ -279,7 +338,9 @@ body {
 .field select {
   font: inherit;
   font-size: 13.5px;
-  background: var(--bg);
+  /* Input rows use PDA's "input strip" tone rather than the page background,
+     so they read as a distinct layer */
+  background: var(--pda-strip);
   border: 1px solid var(--line);
   color: var(--text);
   border-radius: var(--r-sm);
@@ -295,6 +356,7 @@ body {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-soft);
+  background: var(--surface);
 }
 
 .notes {
@@ -312,7 +374,7 @@ body {
 }
 
 .note:empty { display: none; }
-.note.warn { color: var(--warn); }
+.note.warn { color: var(--warn-text); }
 
 /* ---------- stage ---------- */
 
@@ -348,30 +410,34 @@ body {
   position: relative;
   width: 62px;
   height: 62px;
-  background: linear-gradient(155deg, #8c98ff, #5464dd 52%, #3441ad);
-  box-shadow: 0 0 30px -4px rgba(107, 124, 255, 0.55), inset 0 -6px 14px -6px rgba(0, 0, 0, 0.5);
+  /* Idle / connecting / speaking all share this PDA-blue three-stop gradient;
+     only "listening" switches to navy (see .orb.listening below) */
+  background: linear-gradient(155deg, var(--accent-hot), var(--accent) 52%, var(--pda-blue-d));
+  box-shadow: 0 0 26px -6px rgba(33, 150, 243, 0.55), inset 0 -6px 14px -6px rgba(0, 0, 0, 0.25);
   transition: transform 0.3s ease, background 0.35s ease, box-shadow 0.35s ease;
 }
 
 .orb-halo {
   width: 116px;
   height: 116px;
-  background: radial-gradient(circle, rgba(107, 124, 255, 0.16) 0%, transparent 62%);
+  background: radial-gradient(circle, rgba(33, 150, 243, 0.16) 0%, transparent 62%);
   transition: background 0.35s ease;
 }
 
 .orb-ring {
   width: 62px;
   height: 62px;
-  border: 1px solid rgba(107, 124, 255, 0.4);
+  border: 1px solid rgba(33, 150, 243, 0.4);
   opacity: 0;
 }
 
-/* live mic level: a ring that grows with input loudness */
+/* live mic level: a ring that grows with input loudness.
+   Uses navy so the listening-state level ring stays distinct from the
+   blue ring used for "speaking". */
 .orb-level {
   width: 62px;
   height: 62px;
-  border: 2px solid rgba(53, 210, 154, 0.55);
+  border: 2px solid rgba(51, 102, 173, 0.55);
   opacity: 0;
   transform: scale(calc(1 + var(--level) * 0.85));
   transition: transform 0.08s linear, opacity 0.2s;
@@ -380,17 +446,17 @@ body {
 .orb.listening .orb-level { opacity: calc(0.25 + var(--level) * 0.75); }
 
 .orb.listening .orb-core {
-  background: linear-gradient(155deg, #56e0b0, #2bab7d 55%, #16805e);
-  box-shadow: 0 0 34px -4px rgba(53, 210, 154, 0.5), inset 0 -6px 14px -6px rgba(0, 0, 0, 0.5);
+  background: linear-gradient(155deg, #6A8FCB, var(--pda-navy) 55%, #234876);
+  box-shadow: 0 0 30px -6px rgba(51, 102, 173, 0.5), inset 0 -6px 14px -6px rgba(0, 0, 0, 0.25);
 }
 
 .orb.listening .orb-halo {
-  background: radial-gradient(circle, rgba(53, 210, 154, 0.16) 0%, transparent 62%);
+  background: radial-gradient(circle, rgba(51, 102, 173, 0.16) 0%, transparent 62%);
 }
 
 .orb.listening .orb-ring {
   opacity: 1;
-  border-color: rgba(53, 210, 154, 0.32);
+  border-color: rgba(51, 102, 173, 0.32);
   animation: ripple 2.6s ease-out infinite;
 }
 
@@ -398,7 +464,7 @@ body {
 
 .orb.speaking .orb-ring {
   opacity: 1;
-  border-color: rgba(140, 152, 255, 0.5);
+  border-color: rgba(77, 168, 245, 0.55);
   animation: ripple 1.15s ease-out infinite;
 }
 
@@ -414,6 +480,7 @@ body {
 .mode-label {
   margin: 0;
   font-size: 13.5px;
+  font-weight: 600;
   color: var(--text-2);
   min-height: 20px;
   text-align: center;
@@ -450,7 +517,7 @@ body {
   height: 100%;
   width: 0%;
   border-radius: 4px;
-  background: linear-gradient(90deg, var(--live), #7be8c4);
+  background: linear-gradient(90deg, var(--accent), var(--accent-hot));
   transition: width 0.08s linear;
 }
 
@@ -466,19 +533,21 @@ input[type="range"] {
 
 input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  background: var(--text);
-  border: none;
+  background: var(--accent);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(26, 42, 58, 0.3);
 }
 
 input[type="range"]::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  background: var(--text);
-  border: none;
+  background: var(--accent);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(26, 42, 58, 0.3);
 }
 
 /* ---------- transcript ---------- */
@@ -501,9 +570,8 @@ input[type="range"]::-moz-range-thumb {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  background: var(--bg);
 }
-
-
 
 .msg {
   max-width: 80%;
@@ -526,7 +594,7 @@ input[type="range"]::-moz-range-thumb {
 
 .msg-ai {
   align-self: flex-start;
-  background: var(--surface-3);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-bottom-left-radius: 4px;
 }
@@ -555,7 +623,7 @@ input[type="range"]::-moz-range-thumb {
   min-width: 0;
   font: inherit;
   font-size: 13.5px;
-  background: var(--bg);
+  background: var(--surface);
   border: 1px solid var(--line);
   color: var(--text);
   border-radius: var(--r-sm);
@@ -571,6 +639,8 @@ input[type="range"]::-moz-range-thumb {
 .composer input:disabled { opacity: 0.45; }
 
 /* ---------- debug event log ---------- */
+/* Per the user's choice, the debug panel no longer uses a dark "terminal"
+   look — it's unified with the light-card style used everywhere else. */
 
 .debug {
   background: var(--surface);
@@ -594,6 +664,7 @@ input[type="range"]::-moz-range-thumb {
   color: var(--text-2);
   font: inherit;
   font-size: 12.5px;
+  font-weight: 600;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -631,9 +702,10 @@ input[type="range"]::-moz-range-thumb {
 .btn-mini {
   background: var(--surface-3);
   border: 1px solid var(--line);
-  color: var(--text-3);
+  color: var(--text-2);
   font: inherit;
   font-size: 11px;
+  font-weight: 600;
   border-radius: 6px;
   padding: 3px 8px;
   cursor: pointer;
@@ -643,16 +715,18 @@ input[type="range"]::-moz-range-thumb {
 
 /* Details-on is a deliberate, visible state: the log then holds customer data. */
 .btn-mini[aria-pressed="true"] {
-  background: rgba(220, 184, 119, 0.14);
-  border-color: rgba(220, 184, 119, 0.55);
-  color: #e3c68d;
+  background: rgba(232, 180, 92, 0.16);
+  border-color: rgba(232, 180, 92, 0.6);
+  color: var(--warn-text);
 }
 
 .debug-log {
   margin: 0;
   padding: 9px 11px 11px;
   border-top: 1px solid var(--line);
-  background: #05060a;
+  /* Light-card debug panel: use the lightest secondary tone rather than pure
+     white, so the panel still reads as its own block against the log text */
+  background: var(--pda-gray-row);
   max-height: 240px;
   overflow: auto;
   font-family: var(--mono);
@@ -660,14 +734,16 @@ input[type="range"]::-moz-range-thumb {
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
-  color: #aab3c6;
+  color: var(--pda-ink);
 }
 
-.debug-log .t   { color: #545c70; }
-.debug-log .in  { color: #6fd3a6; }
-.debug-log .out { color: #8b9bff; }
-.debug-log .cb  { color: #dcb877; }
-.debug-log .err { color: #ff8f99; }
+/* Log token colors: the dark theme's pastel palette would be unreadable on a
+   light background, so these are darker, higher-contrast equivalents. */
+.debug-log .t   { color: var(--text-3); }
+.debug-log .in  { color: var(--pda-navy); }
+.debug-log .out { color: var(--pda-blue-d); }
+.debug-log .cb  { color: var(--warn-text); }
+.debug-log .err { color: #B23A30; }
 
 /* ---------- narrow screens ---------- */
 
@@ -717,7 +793,7 @@ input[type="range"]::-moz-range-thumb {
 .guide-subject {
   font-family: var(--mono);
   font-size: 10.5px;
-  font-weight: 600;
+  font-weight: 700;
   letter-spacing: .11em;
   text-transform: uppercase;
   color: var(--text-2);
@@ -741,6 +817,7 @@ input[type="range"]::-moz-range-thumb {
 .guide-ask {
   font: inherit;
   font-size: 13.5px;
+  font-weight: 600;
   text-align: left;
   color: var(--text);
   background: var(--surface-2);
@@ -757,13 +834,13 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .guide-ask::before {
-  content: "“";
+  content: "\201c";
   color: var(--text-3);
   margin-right: 1px;
 }
 
 .guide-ask::after {
-  content: "”";
+  content: "\201d";
   color: var(--text-3);
   margin-left: 1px;
 }
