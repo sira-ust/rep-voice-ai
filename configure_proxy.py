@@ -6,6 +6,12 @@ Switch the agent between two ways of reaching Databricks.
     python configure_proxy.py --on https://host   # route through this server
     python configure_proxy.py --off               # back to webhook tools
 
+An ElevenLabs workspace has one agent and every deployment points at it, so
+this changes production as readily as it changes a laptop -- a branch cannot
+isolate it and a git revert cannot undo it. Work against a copy named
+*-test, which is what ELEVENLABS_AGENT_ID should point at while developing;
+anything else is refused unless you pass --force.
+
 **direct** (the default): ElevenLabs holds a Databricks token, calls the
 warehouse itself through webhook tools, and sees every row that comes back.
 Nothing needs to reach this server, so it works from a laptop.
@@ -59,6 +65,9 @@ DBX_SECRET_NAME = os.environ.get("DATABRICKS_SECRET_NAME", "DATABRICKS_BEARER").
 # here, and dropping them left the agent authenticating to the LLM with the
 # proxy's own bearer -- every call failed, for a reason nothing reported.
 STATE_FILE = common.ROOT / ".proxy-previous.json"
+
+
+FORCE = False
 
 
 class Fail(Exception):
@@ -125,6 +134,27 @@ def describe(a: dict) -> None:
         print("  this mode -- nothing in that path knows who is signed in.")
 
 
+def guard_not_production(a: dict, action: str) -> None:
+    """Refuse to switch an agent that is not obviously a test copy.
+
+    There is one agent per workspace and every deployment points at it, so
+    switching it here switches it for production too -- something a branch
+    cannot isolate and a git revert cannot undo. That happened: prod spent a
+    while routed through a laptop tunnel that was about to disappear.
+
+    The name is the check, because it is the thing a person reads before
+    running this. --force is there for the deliberate cutover.
+    """
+    name = a.get("name") or ""
+    if name.endswith("-test") or FORCE:
+        return
+    raise Fail("%r does not look like a test agent, so %s was refused.\n"
+               "    One agent serves every deployment: switching it here switches\n"
+               "    it for production, whatever branch you are on.\n"
+               "    Work against a copy (ELEVENLABS_AGENT_ID in .env), or pass\n"
+               "    --force if this really is the cutover." % (name, action))
+
+
 def turn_on(base_url: str) -> None:
     if not PROXY_SECRET:
         raise Fail("LLM_PROXY_SECRET is missing from .env -- the proxy would reject "
@@ -138,7 +168,9 @@ def turn_on(base_url: str) -> None:
     if not url.endswith("/llm/v1"):
         url = url + "/llm/v1"
 
-    print("\n  Pointing the agent at %s" % url)
+    before_check = agent()
+    guard_not_production(before_check, "--on")
+    print("\n  Pointing %s at %s" % (before_check.get("name"), url))
 
     # The scope token travels as an extra body field, and an agent refuses
     # those unless told to allow them -- with a close code and a message the
@@ -155,13 +187,19 @@ def turn_on(base_url: str) -> None:
     print("  secret    : %s (%s)" % (PROXY_SECRET_NAME, secret_id))
 
     before = agent()
+    if STATE_FILE.is_file():
+        # Running --on twice would record the proxy settings as the thing to
+        # go back to, leaving --off restoring a tunnel that no longer exists.
+        # The first save is the one worth keeping.
+        print("  kept      : existing rollback point in %s" % STATE_FILE.name)
     previous = prompt_of(before)
-    STATE_FILE.write_text(json.dumps({
+    if not STATE_FILE.is_file():
+        STATE_FILE.write_text(json.dumps({
         "custom_llm": previous.get("custom_llm") or {},
         "llm": previous.get("llm"),
         "tool_ids": previous.get("tool_ids") or [],
-    }, indent=2), encoding="utf-8")
-    print("  saved     : previous LLM settings -> %s" % STATE_FILE.name)
+        }, indent=2), encoding="utf-8")
+        print("  saved     : rollback point -> %s" % STATE_FILE.name)
 
     el("/convai/agents/" + urllib.parse.quote(AGENT_ID), "PATCH",
        {"conversation_config": {"agent": {"prompt": {
@@ -199,6 +237,7 @@ def turn_off() -> None:
                    "without it, put the agent back with:\n"
                    "      python configure_llm.py --apply\n"
                    "      python databricks_tool.py --sync" % STATE_FILE.name)
+    guard_not_production(agent(), "--off")
     saved = json.loads(STATE_FILE.read_text(encoding="utf-8"))
     custom = saved.get("custom_llm") or {}
     if not custom.get("url"):
@@ -230,7 +269,11 @@ def main() -> int:
                        help="public https base URL of this server")
     group.add_argument("--off", action="store_true",
                        help="restore direct webhook tools")
+    parser.add_argument("--force", action="store_true",
+                        help="switch an agent that is not named *-test")
     args = parser.parse_args()
+    global FORCE
+    FORCE = args.force
     try:
         if args.on:
             turn_on(args.on)
