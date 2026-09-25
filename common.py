@@ -75,9 +75,25 @@ def _parse(path: Path) -> dict:
 
 
 def load(path: Path | None = None) -> None:
-    """Populate os.environ from .env without overriding what is already set."""
+    """Populate os.environ from .env without overriding what is already set.
+
+    Warns when a secret in the environment differs from the one in .env. That
+    precedence is deliberate -- a systemd unit or CI must be able to override
+    the file -- but it is also how an expired token left in a shell keeps
+    winning after the file has been fixed. The failure that produces is a 403
+    from a service, pages away from the cause, and it has cost real time here.
+    """
+    shadowed = []
     for key, value in _parse(path or ENV_FILE).items():
+        current = os.environ.get(key)
+        if current is not None and current != value and key in SECRET_KEYS:
+            shadowed.append(key)
         os.environ.setdefault(key, value)
+    for key in shadowed:
+        sys.stderr.write(
+            "  WARNING: %s is set in your environment and differs from .env.\n"
+            "           The environment wins, so .env edits have no effect on it.\n"
+            "           python common.py --check  shows which source each key uses.\n" % key)
 
 
 def mask(value: str) -> str:
