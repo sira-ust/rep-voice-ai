@@ -194,6 +194,7 @@
       "lookup_column": "customer_key",
       "match": "exact",
       "columns": [
+        "owner_rep_name",
         "customer_name",
         "period_start",
         "as_of_date",
@@ -229,6 +230,7 @@
       "lookup_column": "customer_key",
       "match": "exact",
       "columns": [
+        "owner_rep_name",
         "item_label",
         "item_category_name",
         "times_purchased",
@@ -261,6 +263,7 @@
       "lookup_column": "customer_key",
       "match": "exact",
       "columns": [
+        "owner_rep_name",
         "item_label",
         "opportunity_reason",
         "is_evidence_based",
@@ -423,6 +426,7 @@
       "lookup_column": "rep_name",
       "match": "contains",
       "columns": [
+        "rep_name",
         "customer_name",
         "city",
         "customer_key",
@@ -455,6 +459,7 @@
       "lookup_column": "anchor_customer_key",
       "match": "exact",
       "columns": [
+        "rep_name",
         "nearby_customer_name",
         "nearby_city",
         "distance_km",
