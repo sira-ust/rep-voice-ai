@@ -395,7 +395,7 @@
       "columns": [
         "customer_name",
         "city",
-        "rep_name",
+        "owner_rep_name",
         "last_order_date",
         "days_since_last_order",
         "orders_recent",
@@ -418,7 +418,10 @@
         "When did RED005 last order?",
         "Which days does RED005 take deliveries?"
       ],
-      "answer_example": "Red Apple Market last ordered on the twenty-second, one day ago. Twenty-three orders recently, averaging about twenty-four thousand dollars."
+      "answer_example": "Red Apple Market last ordered on the twenty-second, one day ago. Twenty-three orders recently, averaging about twenty-four thousand dollars.",
+      "filters": [
+        "is_owned_by_rep"
+      ]
     },
     {
       "name": "lookup_accounts_to_call",
@@ -426,7 +429,7 @@
       "lookup_column": "rep_name",
       "match": "contains",
       "columns": [
-        "rep_name",
+        "owner_rep_name",
         "customer_name",
         "city",
         "customer_key",
@@ -439,7 +442,8 @@
         "needs_attention",
         "customer_is_active",
         "days_since_last_order IS NOT NULL",
-        "days_since_last_order <= 365"
+        "days_since_last_order <= 365",
+        "is_owned_by_rep"
       ],
       "order_by": "attention_priority, days_since_last_order DESC",
       "limit": 6,
