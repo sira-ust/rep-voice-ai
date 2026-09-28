@@ -137,6 +137,13 @@ try:
     LLM_PROXY_MAX_ROUNDS = max(1, int(os.environ.get("LLM_PROXY_MAX_TOOL_ROUNDS", "3") or 3))
 except ValueError:
     LLM_PROXY_MAX_ROUNDS = 3
+# How many times to ask again when the model returns an empty turn. Two is
+# enough: the failure is intermittent rather than sticky, and every retry is
+# another few seconds of a caller waiting.
+try:
+    EMPTY_RETRIES = max(0, int(os.environ.get("LLM_PROXY_EMPTY_RETRIES", "2") or 2))
+except ValueError:
+    EMPTY_RETRIES = 2
 LLM_PROXY_READY = bool(LLM_UPSTREAM_URL and LLM_PROXY_SECRET)
 
 _tool_specs_cache: list[dict] | None = None
@@ -271,7 +278,31 @@ def run_llm_with_tools(messages: list, model: str, max_tokens: int, rep: str = "
         message = ((completion.get("choices") or [{}])[0]).get("message") or {}
         calls = message.get("tool_calls") or []
         if not calls:
-            return message.get("content") or ""
+            answer = (message.get("content") or "").strip()
+            if answer:
+                return answer
+            # Nothing at all. This is the failure that kept killing calls when
+            # ElevenLabs ran the loop: the rows come back, the model returns an
+            # empty turn, and nobody asks again -- the caller hears silence
+            # until a timeout asks if they are still there. Here we can simply
+            # ask again, which is the entire reason for running the loop on
+            # this side.
+            for attempt in range(1, EMPTY_RETRIES + 1):
+                sys.stderr.write("  LLM proxy: empty reply, retrying (%d/%d)\n"
+                                 % (attempt, EMPTY_RETRIES))
+                completion = call_upstream_llm(history, model, max_tokens, tools)
+                message = ((completion.get("choices") or [{}])[0]).get("message") or {}
+                if message.get("tool_calls"):
+                    break            # it wants a tool now; fall through and run it
+                answer = (message.get("content") or "").strip()
+                if answer:
+                    return answer
+            calls = message.get("tool_calls") or []
+            if not calls:
+                sys.stderr.write("  LLM proxy: still empty after %d retries\n"
+                                 % EMPTY_RETRIES)
+                return ("Sorry, I lost my train of thought there. "
+                        "Could you ask me that again?")
 
         history.append(message)
         for call in calls:
