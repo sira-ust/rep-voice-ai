@@ -156,7 +156,8 @@ def converse(messages: list[str], quiet: float = 10.0, cap: float = 75.0,
         while time.time() - last < quiet and time.time() - started < cap:
             try:
                 raw = ws.recv()
-            except (RuntimeError, socket.timeout) as exc:
+            except (RuntimeError, socket.timeout, ConnectionResetError,
+                    ssl.SSLError, OSError) as exc:
                 result["error"] = str(exc)
                 return
             if raw is None:

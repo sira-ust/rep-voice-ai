@@ -380,6 +380,14 @@ def tool_payload(spec: dict, secret_id: str) -> dict:
             "response_timeout_secs": TOOL_TIMEOUT,
             # A warm lookup is ~1.4s and a cold one far worse. Speaking first
             # turns that into conversation rather than silence.
+            #
+            # "auto" was tried, on the theory that forcing the model to emit a
+            # system__message_to_speak on every call gave it one more thing to
+            # malform, and that a malformed call dropped in silence was why
+            # turns sometimes died after a tool returned. It made no
+            # difference: one run in two still ended with the rows fetched and
+            # nothing said. Back to "force", which at least guarantees the
+            # wait is covered.
             "pre_tool_speech": "force",
             # Background noise mid-query must not derail the answer after it.
             "interruption_mode": "disable_during_tool_and_turn",
