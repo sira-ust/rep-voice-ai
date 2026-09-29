@@ -56,6 +56,8 @@ const state = {
   config: { hasApiKey: false, agentId: "" },
   // Live agent reply being streamed in, so an aborted turn still shows text.
   streaming: { id: null, node: null, text: "" },
+  // The rep's words as our own proxy saw them, ahead of ElevenLabs' copy.
+  live: { source: null, node: null },
   // Counters surfaced in the debug header -- the fastest way to tell whether
   // the server's JSON events are reaching the browser at all.
   counts: { incoming: 0, transcripts: 0, agentReplies: 0, audioSent: 0 },
@@ -413,11 +415,13 @@ async function startConversation() {
     // call can change. Sent as an extra body field, which ElevenLabs passes
     // through to our own LLM endpoint untouched.
     let scopeToken = "";
+    let callId = "";
     try {
-      ({ scopeToken } = await getJSON(`/api/scope?rep=${encodeURIComponent(rep)}`));
+      ({ scopeToken, callId } = await getJSON(`/api/scope?rep=${encodeURIComponent(rep)}`));
     } catch (err) {
       log("err", "scope token failed", err.message || String(err));
     }
+    openLiveTranscript(callId);
 
     state.conversation = await Conversation.startSession({
       ...auth,
@@ -447,7 +451,14 @@ async function startConversation() {
         const speaker = role || source;
         if (speaker === "user") {
           state.counts.transcripts += 1;
-          addMessage(message, "user");
+          // Already shown from the live stream: ElevenLabs' copy is the
+          // authoritative wording, so take it, but in the same bubble.
+          if (state.live.node && state.live.node.isConnected) {
+            state.live.node.textContent = message;
+            state.live.node = null;
+          } else {
+            addMessage(message, "user");
+          }
         } else {
           state.counts.agentReplies += 1;
           // Replace the streamed preview rather than adding a second bubble.
@@ -531,6 +542,7 @@ async function startConversation() {
     applyVolume();
     log("out", "session started", state.conversation.getId?.());
   } catch (err) {
+    closeLiveTranscript();
     setStatus("disconnected");
     log("err", "startSession failed", err.message || String(err));
     showError(err.message || String(err));
@@ -549,7 +561,50 @@ async function endConversation() {
   teardown();
 }
 
+/**
+ * Show the rep's words the moment our proxy receives them.
+ *
+ * ElevenLabs sends the page a user transcript only together with the first
+ * sentence of the reply, so a slow lookup kept the rep's own words off the
+ * screen for as long as the lookup took. The proxy has them within a second of
+ * the rep stopping, and runs in the same server as this page, so it passes them
+ * straight here. Proxy mode only: in direct mode nothing is published and this
+ * simply stays quiet.
+ */
+function openLiveTranscript(callId) {
+  closeLiveTranscript();
+  if (!callId || typeof EventSource === "undefined") return;
+  const source = new EventSource(`/api/live?call=${encodeURIComponent(callId)}`);
+  source.onmessage = (msg) => {
+    let item;
+    try {
+      item = JSON.parse(msg.data);
+    } catch {
+      return;
+    }
+    if (!item || item.type !== "user" || !item.text) return;
+    logDetailed("in", "live user words", item.text);
+    const node = state.live.node;
+    // A longer version of the same turn: the rep paused, then carried on.
+    // Only while that bubble is still the newest thing on screen -- never
+    // rewrite a turn that already has a reply under it.
+    if (item.replaces && node && node === el.transcript.lastElementChild) {
+      node.textContent = item.text;
+    } else {
+      state.live.node = addMessage(item.text, "user");
+    }
+  };
+  source.onerror = () => log("err", "live transcript", "stream interrupted; retrying");
+  state.live.source = source;
+}
+
+function closeLiveTranscript() {
+  if (state.live.source) state.live.source.close();
+  state.live = { source: null, node: null };
+}
+
 function teardown() {
+  closeLiveTranscript();
   state.conversation = null;
   state.mode = "listening";
   state.muted = false;

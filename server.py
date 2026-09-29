@@ -19,6 +19,7 @@ import hmac
 import json
 import mimetypes
 import os
+import secrets
 import sys
 import threading
 import time
@@ -149,6 +150,67 @@ LLM_PROXY_READY = bool(LLM_UPSTREAM_URL and LLM_PROXY_SECRET)
 _tool_specs_cache: list[dict] | None = None
 
 
+# ------------------------------------------------------------------ live transcript
+#
+# ElevenLabs sends the page the rep's own words only together with the first
+# sentence of the reply, so a ten-second lookup kept them off the screen for
+# ten seconds. The proxy has those words half a second after the rep stops
+# talking, and it runs in this same process as the page's own server -- so it
+# hands them over directly. The page opens /api/live for its call and shows
+# them the moment they land; ElevenLabs' copy arrives later as a duplicate.
+#
+# In memory and per process, like the rate limits: a restart loses a live
+# call anyway.
+
+LIVE_CALL_SECS = 4 * 3600      # matches the scope token's lifetime
+_live_lock = threading.Condition()
+_live_calls: dict[str, dict] = {}
+
+
+def live_open(user: str) -> str:
+    """A new call id, readable only by `user`."""
+    call = secrets.token_urlsafe(16)
+    now = time.time()
+    with _live_lock:
+        for key in [k for k, v in _live_calls.items() if v["expires"] < now]:
+            del _live_calls[key]
+        _live_calls[call] = {"user": user, "expires": now + LIVE_CALL_SECS,
+                             "events": [], "last": ""}
+    return call
+
+
+def live_publish_user_turn(call: str, text: str) -> None:
+    """The rep's latest words, for the page that owns `call`.
+
+    ElevenLabs often asks twice for one turn: once when the rep pauses, again
+    when they carry on ("...tomorrow?" and then "...tomorrow? Thursday."). A
+    repeat is dropped, and a longer version of the last one replaces it rather
+    than adding a second bubble.
+    """
+    text = (text or "").strip()
+    if not call or not text:
+        return
+    with _live_lock:
+        entry = _live_calls.get(call)
+        if not entry or text == entry["last"]:
+            return
+        replaces = bool(entry["last"]) and text.startswith(entry["last"])
+        entry["last"] = text
+        entry["events"].append({"type": "user", "text": text, "replaces": replaces})
+        _live_lock.notify_all()
+
+
+def last_user_text(messages: list) -> str:
+    for message in reversed(messages or []):
+        if message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if isinstance(content, list):   # OpenAI content parts
+            content = " ".join(p.get("text", "") for p in content if isinstance(p, dict))
+        return content if isinstance(content, str) else ""
+    return ""
+
+
 def tool_specs() -> list[dict]:
     """databricks_tools.json, loaded once. A missing/broken file disables tool
     calls but not the LLM proxy -- plain questions still get answered."""
@@ -266,10 +328,17 @@ def call_upstream_llm(messages: list, model: str, max_tokens: int, tools: list) 
         raise UpstreamError(502, "Could not reach the LLM host: %s" % exc.reason) from exc
 
 
-def run_llm_with_tools(messages: list, model: str, max_tokens: int, rep: str = "") -> str:
+def run_llm_with_tools(messages: list, model: str, max_tokens: int, rep: str = "",
+                       before_lookup=None) -> str:
     """The tool-calling loop that used to run on ElevenLabs' side: ask the
     model, execute anything it asks for ourselves, feed the result back, and
-    repeat until it answers in plain text (or we hit the round cap)."""
+    repeat until it answers in plain text (or we hit the round cap).
+
+    `before_lookup(model_text)` runs ahead of each round of lookups, with any
+    words the model wrote alongside its tool call. It is how the caller gets
+    something said while Databricks works. Returning False means nobody is
+    listening any more, and the loop stops rather than run queries for no one.
+    """
     tools = [openai_tool_schema(s) for s in tool_specs()]
     history = list(messages)
 
@@ -304,6 +373,8 @@ def run_llm_with_tools(messages: list, model: str, max_tokens: int, rep: str = "
                 return ("Sorry, I lost my train of thought there. "
                         "Could you ask me that again?")
 
+        if before_lookup and before_lookup(message.get("content") or "") is False:
+            return ""
         history.append(message)
         for call in calls:
             fn = call.get("function") or {}
@@ -647,6 +718,41 @@ class Handler(BaseHTTPRequestHandler):
             auth.session_lifetime(), "" if INSECURE_COOKIE else "; Secure")
         self._redirect("/", [("Set-Cookie", cookie)])
 
+    def _stream_live(self, call: str) -> None:
+        """Server-sent events for one call: the rep's words as the proxy gets them.
+
+        Only the signed-in user who minted the call can read it. Held open until
+        the page goes away; a comment every 15 s keeps idle proxies from closing
+        it, and doubles as the check that the page is still there.
+        """
+        with _live_lock:
+            entry = _live_calls.get(call)
+        if not entry or entry["user"] != self._user():
+            self._json(404, {"error": "No such call."})
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+        self.close_connection = True
+        sent = len(entry["events"])     # history is ElevenLabs' job; only new words
+        while time.time() < entry["expires"]:
+            with _live_lock:
+                if len(entry["events"]) == sent:
+                    _live_lock.wait(15)
+                fresh = entry["events"][sent:]
+                sent = len(entry["events"])
+            try:
+                for item in fresh:
+                    self.wfile.write(("data: %s\n\n" % json.dumps(item)).encode("utf-8"))
+                if not fresh:
+                    self.wfile.write(b": keep-alive\n\n")
+                self.wfile.flush()
+            except OSError:
+                return
+
     def _handle_api(self, route: str, query: dict) -> None:
         agent_id = (query.get("agent_id", [AGENT_ID])[0] or AGENT_ID).strip()
 
@@ -672,8 +778,13 @@ class Handler(BaseHTTPRequestHandler):
             # TODO: once sign-in maps a user to a rep, take the rep from the
             # session instead of the query string. The proxy side does not
             # change -- it already trusts only what this endpoint signed.
-            self._json(200, {"scopeToken": auth.issue_scope(wanted),
-                             "rep": wanted})
+            call = live_open(self._user())
+            self._json(200, {"scopeToken": auth.issue_scope(wanted, call=call),
+                             "rep": wanted, "callId": call})
+            return
+
+        if route == "/api/live":
+            self._stream_live((query.get("call") or [""])[0])
             return
 
         if route == "/api/reps":
@@ -861,8 +972,59 @@ class Handler(BaseHTTPRequestHandler):
         if max_tokens < 1:  # ElevenLabs' "unlimited" sentinel is -1; vLLM rejects it.
             max_tokens = 512
 
+        # Open the stream before doing any work. ElevenLabs holds back the
+        # caller's own transcript until the model's first byte arrives, so a
+        # lookup that takes ten seconds left the rep's words off the screen for
+        # ten seconds too. A role-only chunk carries no text to speak, but it
+        # is a first byte.
+        chunk_id = "chatcmpl-proxy"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.end_headers()
+
+        def event(data: str) -> bool:
+            """Write one SSE event as an HTTP chunk; False once the caller has gone."""
+            piece = ("data: %s\n\n" % data).encode("utf-8")
+            try:
+                self.wfile.write(b"%x\r\n%s\r\n" % (len(piece), piece))
+                self.wfile.flush()
+                return True
+            except OSError:
+                return False
+
+        def delta(body: dict, finish=None) -> str:
+            return json.dumps({"id": chunk_id, "object": "chat.completion.chunk", "model": model,
+                               "choices": [{"index": 0, "delta": body, "finish_reason": finish}]})
+
+        if not event(delta({"role": "assistant"})):
+            return
+        live_publish_user_turn(auth.read_call(scope_token), last_user_text(messages))
+
+        # Say something the moment a lookup starts. Without it the rep heard
+        # seven to fifteen seconds of nothing while Databricks and the model
+        # worked -- the webhook tools' pre-tool speech used to fill that gap,
+        # and moving the loop here took it away. Once per turn: a lookup that
+        # leads to another must not be announced twice.
+        #
+        # The model's own words go first when it wrote a short line alongside
+        # its tool call ("Let me check their pitch list."); they fit the
+        # question better than anything fixed here.
+        spoken: list = []
+
+        def before_lookup(model_text: str) -> bool:
+            if spoken:
+                return spoken[0]
+            line = " ".join(model_text.split())
+            if not line or len(line) > 80 or not line.endswith((".", "!")):
+                line = "Let me check."
+            spoken.append(event(delta({"content": line + " "})))
+            return spoken[0]
+
         try:
-            answer = run_llm_with_tools(messages, model, max_tokens, rep)
+            answer = run_llm_with_tools(messages, model, max_tokens, rep, before_lookup)
         except UpstreamError as exc:
             sys.stderr.write("  LLM proxy upstream error: %s\n" % exc.message)
             answer = "I'm sorry, I ran into a problem answering that."
@@ -870,18 +1032,14 @@ class Handler(BaseHTTPRequestHandler):
             sys.stderr.write("  LLM proxy error: %s: %s\n" % (type(exc).__name__, exc))
             answer = "I'm sorry, I ran into a problem answering that."
 
-        # A single fake SSE chunk: ElevenLabs requires text/event-stream, but
-        # nothing requires token-by-token streaming -- v1 waits for the whole
-        # answer (including any Databricks round trip) before replying once.
-        final = {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
-        chunk = {
-            "id": "chatcmpl-proxy", "object": "chat.completion.chunk", "model": model,
-            "choices": [{"index": 0, "delta": {"role": "assistant", "content": answer},
-                         "finish_reason": None}],
-        }
-        body = ("data: %s\n\ndata: %s\n\ndata: [DONE]\n\n"
-                % (json.dumps(chunk), json.dumps(final))).encode("utf-8")
-        self._send(200, body, "text/event-stream; charset=utf-8")
+        # The answer itself still arrives whole: the tool loop has to finish
+        # before there is anything true to say.
+        if event(delta({"content": answer})) and event(delta({}, "stop")) and event("[DONE]"):
+            try:
+                self.wfile.write(b"0\r\n\r\n")
+                self.wfile.flush()
+            except OSError:
+                pass
 
     def _serve_static(self, url_path: str) -> None:
         rel = urllib.parse.unquote(url_path).lstrip("/") or "index.html"

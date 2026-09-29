@@ -168,7 +168,7 @@ def read_session(cookie_value: str | None) -> str | None:
     return name if name in users() else None
 
 
-def issue_scope(rep: str, seconds: int = 4 * 3600) -> str:
+def issue_scope(rep: str, seconds: int = 4 * 3600, call: str = "") -> str:
     """A signed statement of whose accounts a conversation may read.
 
     The proxy is called by ElevenLabs, not by the browser, so no cookie
@@ -180,9 +180,14 @@ def issue_scope(rep: str, seconds: int = 4 * 3600) -> str:
 
     Short-lived because it rides through a third party. Long enough for a
     conversation, not for a working day.
+
+    `call` names the page that started the conversation, so the proxy can hand
+    the rep's words straight back to it (see read_call).
     """
-    payload = json.dumps({"rep": rep, "exp": int(time.time()) + seconds},
-                         separators=(",", ":")).encode("utf-8")
+    claims = {"rep": rep, "exp": int(time.time()) + seconds}
+    if call:
+        claims["call"] = call
+    payload = json.dumps(claims, separators=(",", ":")).encode("utf-8")
     body = base64.urlsafe_b64encode(payload).decode().rstrip("=")
     sig = hmac.new(_secret(), body.encode("ascii"), hashlib.sha256).digest()
     return "%s.%s" % (body, base64.urlsafe_b64encode(sig).decode().rstrip("="))
@@ -194,6 +199,19 @@ def read_scope(token: str | None) -> str | None:
     None is not "no restriction" -- callers must treat it as untrusted and
     refuse, or an expired token would silently widen access to everything.
     """
+    claims = _scope_claims(token)
+    rep = claims.get("rep") if claims else None
+    return rep if isinstance(rep, str) else None
+
+
+def read_call(token: str | None) -> str:
+    """The call id a valid scope token carries, or "" if it has none."""
+    claims = _scope_claims(token)
+    call = claims.get("call") if claims else None
+    return call if isinstance(call, str) else ""
+
+
+def _scope_claims(token: str | None) -> dict | None:
     if not token or "." not in token:
         return None
     body, _, sig_b64 = token.rpartition(".")
@@ -209,10 +227,9 @@ def read_scope(token: str | None) -> str | None:
         claims = json.loads(base64.urlsafe_b64decode(pad(body)))
     except (ValueError, TypeError):
         return None
-    if int(claims.get("exp", 0)) < time.time():
+    if not isinstance(claims, dict) or int(claims.get("exp", 0)) < time.time():
         return None
-    rep = claims.get("rep")
-    return rep if isinstance(rep, str) else None
+    return claims
 
 
 # ------------------------------------------------------------------ rate limit
