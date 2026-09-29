@@ -155,6 +155,27 @@ def guard_not_production(a: dict, action: str) -> None:
                "    --force if this really is the cutover." % (name, action))
 
 
+def agents_using_secret(secret_id: str) -> list[str]:
+    """Names of other agents with a tool attached that authenticates with it.
+
+    Secrets and tools belong to the workspace, not to an agent, and a test
+    copy shares both with production. Deleting the Databricks secret because
+    the test agent went onto the proxy left every production lookup failing
+    with nothing on the production agent having changed.
+    """
+    users = {tool.get("id") or tool.get("tool_id")
+             for tool in el("/convai/tools").get("tools", [])
+             if secret_id in json.dumps(tool)}
+    names = []
+    for item in el("/convai/agents?page_size=100").get("agents", []):
+        if item.get("agent_id") == AGENT_ID:
+            continue
+        attached = prompt_of(el("/convai/agents/" + urllib.parse.quote(item["agent_id"])))
+        if users & set(attached.get("tool_ids") or []):
+            names.append(item.get("name") or item["agent_id"])
+    return names
+
+
 def turn_on(base_url: str) -> None:
     if not PROXY_SECRET:
         raise Fail("LLM_PROXY_SECRET is missing from .env -- the proxy would reject "
@@ -224,6 +245,13 @@ def turn_on(base_url: str) -> None:
     # no way to reach the data at all.
     for secret in el("/convai/secrets").get("secrets", []):
         if secret.get("name") == DBX_SECRET_NAME:
+            others = agents_using_secret(secret["secret_id"])
+            if others:
+                print("  kept      : %s -- still used by %s. Deleting it would break"
+                      % (DBX_SECRET_NAME, ", ".join(others)))
+                print("              their lookups; it goes when the last of them is"
+                      " switched.")
+                break
             el("/convai/secrets/" + secret["secret_id"], "DELETE")
             print("  deleted   : %s -- ElevenLabs no longer holds a Databricks "
                   "credential" % DBX_SECRET_NAME)
@@ -252,12 +280,15 @@ def turn_off() -> None:
        }}}})
     print("  restored  : %d webhook tool(s)" % len(saved.get("tool_ids") or []))
     STATE_FILE.unlink()
-    # Those tools authenticate with a secret --on deleted, so they are pointing
-    # at nothing until it is recreated. Say so plainly: a restored tool that
-    # quietly fails is worse than one that is obviously missing.
-    print("\n  The Databricks secret was deleted when the proxy went on, so the")
-    print("  restored tools cannot authenticate yet. Finish with:")
-    print("      python databricks_tool.py --sync")
+    # Those tools authenticate with a secret --on may have deleted, in which
+    # case they are pointing at nothing until it is recreated. Say so plainly:
+    # a restored tool that quietly fails is worse than one that is obviously
+    # missing.
+    names = [s.get("name") for s in el("/convai/secrets").get("secrets", [])]
+    if DBX_SECRET_NAME not in names:
+        print("\n  The Databricks secret was deleted when the proxy went on, so the")
+        print("  restored tools cannot authenticate yet. Finish with:")
+        print("      python databricks_tool.py --sync")
     describe(agent())
 
 
