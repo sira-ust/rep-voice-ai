@@ -175,29 +175,59 @@ def live_open(user: str) -> str:
         for key in [k for k, v in _live_calls.items() if v["expires"] < now]:
             del _live_calls[key]
         _live_calls[call] = {"user": user, "expires": now + LIVE_CALL_SECS,
-                             "events": [], "last": ""}
+                             "events": [], "last": "", "seq": 0}
     return call
 
 
-def live_publish_user_turn(call: str, text: str) -> None:
+def live_publish_user_turn(call: str, text: str) -> int:
     """The rep's latest words, for the page that owns `call`.
 
-    ElevenLabs often asks twice for one turn: once when the rep pauses, again
-    when they carry on ("...tomorrow?" and then "...tomorrow? Thursday."). A
-    repeat is dropped, and a longer version of the last one replaces it rather
-    than adding a second bubble.
+    ElevenLabs often asks more than once for one turn: at each pause, and
+    again when the rep carries on, sometimes re-transcribing the whole thing.
+    An exact repeat is dropped here; the page keeps one bubble per turn and
+    lets each later version replace the one before.
+
+    Returns this request's number. ElevenLabs asks at every pause while the rep
+    is still talking and abandons all but the last request, without always
+    closing the others -- so the newest request for a call is the only one
+    whose reply is real (see live_is_current).
     """
     text = (text or "").strip()
+    with _live_lock:
+        entry = _live_calls.get(call) if call else None
+        if not entry:
+            return 0
+        entry["seq"] += 1
+        seq = entry["seq"]
+        if not text or text == entry["last"]:
+            return seq
+        entry["last"] = text
+        entry["events"].append({"type": "user", "text": text})
+        _live_lock.notify_all()
+        return seq
+
+
+def live_is_current(call: str, seq: int) -> bool:
+    """False once a newer request for the same call has arrived."""
+    with _live_lock:
+        entry = _live_calls.get(call) if call else None
+        return not entry or entry["seq"] == seq
+
+
+def live_publish_reply(call: str, text: str, start: bool, seq: int = 0) -> None:
+    """A piece of the proxy's own reply, the moment it goes to ElevenLabs.
+
+    ElevenLabs streams reply text to the page too, but holds it back -- the
+    "Let me check." spoken at once reached the page only with the full answer,
+    seconds later. `start` opens a new bubble; later pieces append to it.
+    """
     if not call or not text:
         return
     with _live_lock:
         entry = _live_calls.get(call)
-        if not entry or text == entry["last"]:
-            return
-        replaces = bool(entry["last"]) and text.startswith(entry["last"])
-        entry["last"] = text
-        entry["events"].append({"type": "user", "text": text, "replaces": replaces})
-        _live_lock.notify_all()
+        if entry and (not seq or entry["seq"] == seq):
+            entry["events"].append({"type": "agent", "text": text, "start": start})
+            _live_lock.notify_all()
 
 
 def last_user_text(messages: list) -> str:
@@ -1001,7 +1031,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if not event(delta({"role": "assistant"})):
             return
-        live_publish_user_turn(auth.read_call(scope_token), last_user_text(messages))
+        call = auth.read_call(scope_token)
+        seq = live_publish_user_turn(call, last_user_text(messages))
 
         # Say something the moment a lookup starts. Without it the rep heard
         # seven to fifteen seconds of nothing while Databricks and the model
@@ -1015,12 +1046,18 @@ class Handler(BaseHTTPRequestHandler):
         spoken: list = []
 
         def before_lookup(model_text: str) -> bool:
+            # Superseded: the rep kept talking and ElevenLabs asked again.
+            # Nobody will hear this answer, so stop before querying for it.
+            if not live_is_current(call, seq):
+                return False
             if spoken:
                 return spoken[0]
             line = " ".join(model_text.split())
             if not line or len(line) > 80 or not line.endswith((".", "!")):
                 line = "Let me check."
             spoken.append(event(delta({"content": line + " "})))
+            if spoken[0]:
+                live_publish_reply(call, line + " ", start=True, seq=seq)
             return spoken[0]
 
         try:
@@ -1034,7 +1071,10 @@ class Handler(BaseHTTPRequestHandler):
 
         # The answer itself still arrives whole: the tool loop has to finish
         # before there is anything true to say.
-        if event(delta({"content": answer})) and event(delta({}, "stop")) and event("[DONE]"):
+        sent = event(delta({"content": answer}))
+        if sent:
+            live_publish_reply(call, answer, start=not spoken, seq=seq)
+        if sent and event(delta({}, "stop")) and event("[DONE]"):
             try:
                 self.wfile.write(b"0\r\n\r\n")
                 self.wfile.flush()

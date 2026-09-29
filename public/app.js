@@ -57,7 +57,7 @@ const state = {
   // Live agent reply being streamed in, so an aborted turn still shows text.
   streaming: { id: null, node: null, text: "" },
   // The rep's words as our own proxy saw them, ahead of ElevenLabs' copy.
-  live: { source: null, node: null },
+  live: { source: null, node: null, reply: null },
   // Counters surfaced in the debug header -- the fastest way to tell whether
   // the server's JSON events are reaching the browser at all.
   counts: { incoming: 0, transcripts: 0, agentReplies: 0, audioSent: 0 },
@@ -462,7 +462,12 @@ async function startConversation() {
         } else {
           state.counts.agentReplies += 1;
           // Replace the streamed preview rather than adding a second bubble.
-          if (state.streaming.node) {
+          // ElevenLabs' copy is what was actually spoken -- cut short if the
+          // rep interrupted -- so its wording wins.
+          if (state.live.reply && state.live.reply.isConnected) {
+            state.live.reply.textContent = message;
+            state.live.reply = null;
+          } else if (state.streaming.node) {
             state.streaming.node.textContent = message;
             state.streaming = { id: null, node: null, text: "" };
           } else {
@@ -582,13 +587,26 @@ function openLiveTranscript(callId) {
     } catch {
       return;
     }
-    if (!item || item.type !== "user" || !item.text) return;
+    if (!item || !item.text) return;
+    if (item.type === "agent") {
+      showLiveReply(item);
+      return;
+    }
+    if (item.type !== "user") return;
     logDetailed("in", "live user words", item.text);
+    // One bubble per turn, however many times ElevenLabs asks. It sends a new
+    // request at each pause and often re-transcribes the whole utterance, so
+    // a later version is not always the earlier one with words added -- and
+    // treating it as a new turn left the first version, and the reply to it,
+    // on screen as a turn that never happened. Until ElevenLabs confirms the
+    // turn (onMessage below), each new version replaces the last.
+    //
+    // A reply not yet confirmed answered a version the rep has since added
+    // to; ElevenLabs dropped it, so it comes off the screen.
+    if (state.live.reply && state.live.reply.isConnected) state.live.reply.remove();
+    state.live.reply = null;
     const node = state.live.node;
-    // A longer version of the same turn: the rep paused, then carried on.
-    // Only while that bubble is still the newest thing on screen -- never
-    // rewrite a turn that already has a reply under it.
-    if (item.replaces && node && node === el.transcript.lastElementChild) {
+    if (node && node.isConnected) {
       node.textContent = item.text;
     } else {
       state.live.node = addMessage(item.text, "user");
@@ -598,9 +616,28 @@ function openLiveTranscript(callId) {
   state.live.source = source;
 }
 
+/**
+ * The proxy's own reply, piece by piece: "Let me check." the moment a lookup
+ * starts, then the answer. ElevenLabs streams reply text as well but holds it
+ * back until the whole answer exists, so the rep heard "Let me check." with
+ * nothing on screen until it had finished speaking the result.
+ */
+function showLiveReply(item) {
+  logDetailed("in", "live reply", item.text);
+  const node = state.live.reply;
+  if (node && node.isConnected) {
+    // Until ElevenLabs confirms it, this turn's reply: a later piece adds to
+    // it, and a second opening -- ElevenLabs asked again -- replaces it.
+    node.textContent = item.start ? item.text : node.textContent + item.text;
+  } else {
+    state.live.reply = addMessage(item.text, "ai");
+  }
+  el.transcript.scrollTop = el.transcript.scrollHeight;
+}
+
 function closeLiveTranscript() {
   if (state.live.source) state.live.source.close();
-  state.live = { source: null, node: null };
+  state.live = { source: null, node: null, reply: null };
 }
 
 function teardown() {
