@@ -265,6 +265,7 @@
       "lookup_column": "customer_key",
       "match": "exact",
       "columns": [
+        "item_no",
         "item_label",
         "opportunity_reason",
         "is_evidence_based",

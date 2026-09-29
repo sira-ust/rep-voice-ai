@@ -307,10 +307,15 @@ def statement(spec: dict, rep: str = "") -> str:
         # The second test is what makes "padthai" find "PAD THAI NOODLE" and
         # "pad thai" find "PADTHAI RICE STICK" -- this catalogue spells it both
         # ways, which no amount of model-side normalising can guess.
+        #
+        # Connecting words are skipped. The catalogue abbreviates them away --
+        # "EEL W/TERIYAKI GLAZE" -- while the agent, reading that name aloud,
+        # says "Eel with Teriyaki Glaze", and a rep repeating it back found
+        # nothing because "with" is not in the name.
         where = [
             "forall("
             "split(regexp_replace(lower(trim(:lookup_value)), '[^a-z0-9 ]', ' '), '\\\\s+'),"
-            " w -> w = ''"
+            " w -> w = '' OR w IN ('with', 'and', 'the', 'of', 'in', 'for', 'a', 'an')"
             " OR lower({c}) LIKE concat('%%', regexp_replace(w, 's$', ''), '%%')"
             " OR replace(lower({c}), ' ', '') LIKE concat('%%', regexp_replace(w, 's$', ''), '%%')"
             ")".format(c=column)
