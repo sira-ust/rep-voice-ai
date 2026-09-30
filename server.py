@@ -928,13 +928,32 @@ class Handler(BaseHTTPRequestHandler):
         if not entry or entry["user"] != self._user():
             self._json(404, {"error": "No such call."})
             return
+        # Chunked, like the proxy's own stream. This used to be a bare body
+        # ended by closing the connection, which worked on a laptop and never
+        # arrived through the office tunnel: a proxy that cannot see where a
+        # response ends may hold it until it does, and this one never does.
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.send_header("X-Accel-Buffering", "no")
         self.send_header("Connection", "close")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.close_connection = True
+
+        def chunk(data: bytes) -> bool:
+            try:
+                self.wfile.write(b"%x\r\n%s\r\n" % (len(data), data))
+                self.wfile.flush()
+                return True
+            except OSError:
+                return False
+
+        # Something at once, so the stream is visibly open end to end rather
+        # than waiting on the first keep-alive.
+        if not chunk(b": open\n\n"):
+            return
         sent = len(entry["events"])     # history is ElevenLabs' job; only new words
         while time.time() < entry["expires"]:
             with _live_lock:
@@ -942,14 +961,10 @@ class Handler(BaseHTTPRequestHandler):
                     _live_lock.wait(15)
                 fresh = entry["events"][sent:]
                 sent = len(entry["events"])
-            try:
-                for item in fresh:
-                    self.wfile.write(("data: %s\n\n" % json.dumps(item)).encode("utf-8"))
-                if not fresh:
-                    self.wfile.write(b": keep-alive\n\n")
-                self.wfile.flush()
-            except OSError:
+            data = b"".join(("data: %s\n\n" % json.dumps(item)).encode("utf-8") for item in fresh)
+            if not chunk(data or b": keep-alive\n\n"):
                 return
+        chunk(b"")          # the terminating zero-length chunk
 
     def _handle_api(self, route: str, query: dict) -> None:
         agent_id = (query.get("agent_id", [AGENT_ID])[0] or AGENT_ID).strip()
@@ -1180,6 +1195,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Transfer-Encoding", "chunked")
+        self.send_header("X-Accel-Buffering", "no")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
 
