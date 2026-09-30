@@ -205,7 +205,8 @@
       ],
       "filters": [
         "period_type = 'month'",
-        "is_current"
+        "is_current",
+        "customer_name IS NOT NULL"
       ],
       "limit": 1,
       "value_label": "account key being asked about",
@@ -216,7 +217,8 @@
         "What did Red Apple Market buy last month?",
         "How are returns looking for that account?"
       ],
-      "answer_example": "Five invoices this month. Only part of that is priced in our data, so I can give you the count with confidence but not the full value."
+      "answer_example": "Five invoices this month. Only part of that is priced in our data, so I can give you the count with confidence but not the full value.",
+      "rep_column": "owner_rep_name"
     },
     {
       "name": "lookup_account_top_items",
@@ -248,8 +250,10 @@
       ],
       "answer_example": "They buy KYJ Pork Sausage most often — five hundred and ninety-five times, last on the eleventh of August.",
       "filters": [
-        "item_label IS NOT NULL"
-      ]
+        "item_label IS NOT NULL",
+        "customer_name IS NOT NULL"
+      ],
+      "rep_column": "owner_rep_name"
     },
     {
       "name": "lookup_pitch_list",
@@ -257,6 +261,7 @@
       "lookup_column": "customer_key",
       "match": "exact",
       "columns": [
+        "item_no",
         "owner_rep_name",
         "item_label",
         "opportunity_reason",
@@ -283,8 +288,10 @@
       ],
       "answer_example": "They are due for Soy Bean with Ginger Sauce, and Punjas Butter Snap Cookies are worth a mention. Want the detail on either?",
       "filters": [
-        "item_label IS NOT NULL"
-      ]
+        "item_label IS NOT NULL",
+        "customer_name IS NOT NULL"
+      ],
+      "rep_column": "owner_rep_name"
     },
     {
       "name": "search_items",
@@ -379,7 +386,8 @@
         "How is Asian Market doing?",
         "Look up Lee's Sandwiches"
       ],
-      "answer_example": "I found one Red Apple Market in Anchorage, owned by Tech Tov. Would you like their recent activity?"
+      "answer_example": "I found one Red Apple Market in Anchorage, owned by Tech Tov. Would you like their recent activity?",
+      "rep_column": "owner_rep_name"
     },
     {
       "name": "lookup_account_status",
@@ -413,7 +421,9 @@
         "Which days does RED005 take deliveries?"
       ],
       "answer_example": "Red Apple Market last ordered on the twenty-second, one day ago. Twenty-three orders recently, averaging about twenty-four thousand dollars.",
+      "rep_column": "owner_rep_name",
       "filters": [
+        "customer_name IS NOT NULL",
         "is_owned_by_rep"
       ]
     },
@@ -437,6 +447,7 @@
         "customer_is_active",
         "days_since_last_order IS NOT NULL",
         "days_since_last_order <= 365",
+        "customer_name IS NOT NULL",
         "is_owned_by_rep"
       ],
       "order_by": "attention_priority, days_since_last_order DESC",

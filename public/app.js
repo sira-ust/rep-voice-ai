@@ -56,6 +56,8 @@ const state = {
   config: { hasApiKey: false, agentId: "" },
   // Live agent reply being streamed in, so an aborted turn still shows text.
   streaming: { id: null, node: null, text: "" },
+  // The rep's words as our own proxy saw them, ahead of ElevenLabs' copy.
+  live: { source: null, node: null, reply: null },
   // Counters surfaced in the debug header -- the fastest way to tell whether
   // the server's JSON events are reaching the browser at all.
   counts: { incoming: 0, transcripts: 0, agentReplies: 0, audioSent: 0 },
@@ -407,11 +409,26 @@ async function startConversation() {
     const rep = el.repSelect ? el.repSelect.value : "";
     log("out", "signed in as", rep || "All reps");
 
+    // A signed statement of whose accounts this conversation may read. The
+    // page cannot mint one and the agent cannot alter one, so the rep survives
+    // the round trip through ElevenLabs without being something anyone on the
+    // call can change. Sent as an extra body field, which ElevenLabs passes
+    // through to our own LLM endpoint untouched.
+    let scopeToken = "";
+    let callId = "";
+    try {
+      ({ scopeToken, callId } = await getJSON(`/api/scope?rep=${encodeURIComponent(rep)}`));
+    } catch (err) {
+      log("err", "scope token failed", err.message || String(err));
+    }
+    openLiveTranscript(callId);
+
     state.conversation = await Conversation.startSession({
       ...auth,
       connectionType,
       textOnly: false,
       dynamicVariables: { rep_name: rep || "All" },
+      customLlmExtraBody: { scope_token: scopeToken },
 
       onConnect: ({ conversationId }) => {
         log("cb", "onConnect", conversationId);
@@ -434,11 +451,22 @@ async function startConversation() {
         const speaker = role || source;
         if (speaker === "user") {
           state.counts.transcripts += 1;
-          addMessage(message, "user");
+          // Already shown from the live stream: ElevenLabs' copy is the
+          // authoritative wording, so take it, but in the same bubble.
+          if (state.live.node && state.live.node.isConnected) {
+            state.live.node.textContent = message;
+            state.live.node = null;
+          } else {
+            addMessage(message, "user");
+          }
         } else {
           state.counts.agentReplies += 1;
           // Replace the streamed preview rather than adding a second bubble.
-          if (state.streaming.node) {
+          // The live bubble is kept as it is: ElevenLabs' copy is the same
+          // words with the formatting stripped for the voice.
+          if (state.live.reply && state.live.reply.isConnected) {
+            state.live.reply = null;
+          } else if (state.streaming.node) {
             state.streaming.node.textContent = message;
             state.streaming = { id: null, node: null, text: "" };
           } else {
@@ -518,6 +546,7 @@ async function startConversation() {
     applyVolume();
     log("out", "session started", state.conversation.getId?.());
   } catch (err) {
+    closeLiveTranscript();
     setStatus("disconnected");
     log("err", "startSession failed", err.message || String(err));
     showError(err.message || String(err));
@@ -536,7 +565,116 @@ async function endConversation() {
   teardown();
 }
 
+/**
+ * Show the rep's words the moment our proxy receives them.
+ *
+ * ElevenLabs sends the page a user transcript only together with the first
+ * sentence of the reply, so a slow lookup kept the rep's own words off the
+ * screen for as long as the lookup took. The proxy has them within a second of
+ * the rep stopping, and runs in the same server as this page, so it passes them
+ * straight here. Proxy mode only: in direct mode nothing is published and this
+ * simply stays quiet.
+ */
+function openLiveTranscript(callId) {
+  closeLiveTranscript();
+  if (!callId || typeof EventSource === "undefined") return;
+  const source = new EventSource(`/api/live?call=${encodeURIComponent(callId)}`);
+  source.onmessage = (msg) => {
+    let item;
+    try {
+      item = JSON.parse(msg.data);
+    } catch {
+      return;
+    }
+    if (!item || !item.text) return;
+    if (item.type === "agent") {
+      showLiveReply(item);
+      return;
+    }
+    if (item.type !== "user") return;
+    logDetailed("in", "live user words", item.text);
+    // One bubble per turn, however many times ElevenLabs asks. It sends a new
+    // request at each pause and often re-transcribes the whole utterance, so
+    // a later version is not always the earlier one with words added -- and
+    // treating it as a new turn left the first version, and the reply to it,
+    // on screen as a turn that never happened. Until ElevenLabs confirms the
+    // turn (onMessage below), each new version replaces the last.
+    //
+    // A reply not yet confirmed answered a version the rep has since added
+    // to; ElevenLabs dropped it, so it comes off the screen.
+    if (state.live.reply && state.live.reply.isConnected) state.live.reply.remove();
+    state.live.reply = null;
+    const node = state.live.node;
+    if (node && node.isConnected) {
+      node.textContent = item.text;
+    } else {
+      state.live.node = addMessage(item.text, "user");
+    }
+  };
+  source.onerror = () => log("err", "live transcript", "stream interrupted; retrying");
+  state.live.source = source;
+}
+
+/**
+ * The proxy's own reply, piece by piece: "Let me check." the moment a lookup
+ * starts, then the answer. ElevenLabs streams reply text as well but holds it
+ * back until the whole answer exists, so the rep heard "Let me check." with
+ * nothing on screen until it had finished speaking the result.
+ */
+function showLiveReply(item) {
+  logDetailed("in", "live reply", item.text);
+  let node = state.live.reply;
+  let raw = item.text;
+  if (node && node.isConnected) {
+    // Until ElevenLabs confirms it, this turn's reply: a later piece adds to
+    // it, and a second opening -- ElevenLabs asked again -- replaces it.
+    // On its own line, so an answer that opens with a list still renders as one.
+    if (!item.start) raw = `${(node.dataset.raw || "").trimEnd()}\n${item.text}`;
+  } else {
+    node = state.live.reply = addMessage("", "ai");
+  }
+  renderReply(node, raw);
+  el.transcript.scrollTop = el.transcript.scrollHeight;
+}
+
+/**
+ * Show a reply's light markdown: **bold**, *italics*, ==highlight== and "- "
+ * lists. The proxy asks the model for it so figures and names stand out on
+ * screen; the voice gets the same words with the markup stripped.
+ *
+ * Everything is HTML-escaped first and only these few patterns are turned back
+ * into tags, so nothing the model writes can put markup of its own on the page.
+ */
+function renderReply(node, raw) {
+  node.dataset.raw = raw;
+  if (HAN.test(raw)) node.lang = "zh";
+  const escape = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const inline = (s) => escape(s)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/==(.+?)==/g, "<mark>$1</mark>")
+    .replace(/(^|[^\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])/g, "$1<em>$2</em>");
+  const html = [];
+  let list = null;
+  for (const line of raw.split("\n")) {
+    const bullet = line.match(/^\s*(?:[-*\u2022]|\d+[.\u0029])\s+(.*)$/);
+    if (bullet) {
+      if (!list) html.push((list = []));
+      list.push(`<li>${inline(bullet[1])}</li>`);
+    } else if (line.trim()) {
+      list = null;
+      html.push(`<p>${inline(line.trim())}</p>`);
+    }
+  }
+  node.innerHTML = html.map((p) => (Array.isArray(p) ? `<ul>${p.join("")}</ul>` : p)).join("");
+}
+
+function closeLiveTranscript() {
+  if (state.live.source) state.live.source.close();
+  state.live = { source: null, node: null, reply: null };
+}
+
 function teardown() {
+  closeLiveTranscript();
   state.conversation = null;
   state.mode = "listening";
   state.muted = false;

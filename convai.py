@@ -22,6 +22,7 @@ import time
 import urllib.parse
 import urllib.request
 
+import auth
 import common  # loads .env on import
 
 EL_API = "https://api.elevenlabs.io/v1"
@@ -145,6 +146,11 @@ def converse(messages: list[str], quiet: float = 10.0, cap: float = 75.0,
         # page sends whoever is picked; here "All" is the honest default, and
         # callers who are testing a rep's own numbers say so in the message.
         "dynamic_variables": {"rep_name": rep or "All"},
+        # And the signed version of the same thing, which is what the proxy
+        # acts on. In direct mode nothing reads it; in proxy mode a request
+        # without it is refused, so a text test would fail for a reason that
+        # has nothing to do with what it was testing.
+        "custom_llm_extra_body": {"scope_token": auth.issue_scope(rep)},
     }))
 
     result = {"conversation_id": None, "opener": None, "replies": [], "error": None}

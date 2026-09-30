@@ -96,14 +96,15 @@ def main() -> int:
                         help="allow changing an agent not named *-test")
     args = parser.parse_args()
 
-    # One agent serves every deployment, so a mutating run reaches
-    # production unless pointed elsewhere. Reads are left alone.
+    # One agent serves every deployment, so a mutating run here reaches
+    # production unless it is pointed somewhere else. Reads are left alone.
     if args.apply:
         try:
             common.require_test_agent("This", force=args.force)
         except common.Fail as exc:
             print("\n  ERROR: %s\n" % exc, file=sys.stderr)
             return 1
+
 
     try:
         agent, live, live_greeting = get_prompt()
