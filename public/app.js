@@ -462,10 +462,9 @@ async function startConversation() {
         } else {
           state.counts.agentReplies += 1;
           // Replace the streamed preview rather than adding a second bubble.
-          // ElevenLabs' copy is what was actually spoken -- cut short if the
-          // rep interrupted -- so its wording wins.
+          // The live bubble is kept as it is: ElevenLabs' copy is the same
+          // words with the formatting stripped for the voice.
           if (state.live.reply && state.live.reply.isConnected) {
-            state.live.reply.textContent = message;
             state.live.reply = null;
           } else if (state.streaming.node) {
             state.streaming.node.textContent = message;
@@ -624,15 +623,49 @@ function openLiveTranscript(callId) {
  */
 function showLiveReply(item) {
   logDetailed("in", "live reply", item.text);
-  const node = state.live.reply;
+  let node = state.live.reply;
+  let raw = item.text;
   if (node && node.isConnected) {
     // Until ElevenLabs confirms it, this turn's reply: a later piece adds to
     // it, and a second opening -- ElevenLabs asked again -- replaces it.
-    node.textContent = item.start ? item.text : node.textContent + item.text;
+    // On its own line, so an answer that opens with a list still renders as one.
+    if (!item.start) raw = `${(node.dataset.raw || "").trimEnd()}\n${item.text}`;
   } else {
-    state.live.reply = addMessage(item.text, "ai");
+    node = state.live.reply = addMessage("", "ai");
   }
+  renderReply(node, raw);
   el.transcript.scrollTop = el.transcript.scrollHeight;
+}
+
+/**
+ * Show a reply's light markdown: **bold**, *italics*, ==highlight== and "- "
+ * lists. The proxy asks the model for it so figures and names stand out on
+ * screen; the voice gets the same words with the markup stripped.
+ *
+ * Everything is HTML-escaped first and only these few patterns are turned back
+ * into tags, so nothing the model writes can put markup of its own on the page.
+ */
+function renderReply(node, raw) {
+  node.dataset.raw = raw;
+  if (HAN.test(raw)) node.lang = "zh";
+  const escape = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const inline = (s) => escape(s)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/==(.+?)==/g, "<mark>$1</mark>")
+    .replace(/(^|[^\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])/g, "$1<em>$2</em>");
+  const html = [];
+  let list = null;
+  for (const line of raw.split("\n")) {
+    const bullet = line.match(/^\s*(?:[-*\u2022]|\d+[.\u0029])\s+(.*)$/);
+    if (bullet) {
+      if (!list) html.push((list = []));
+      list.push(`<li>${inline(bullet[1])}</li>`);
+    } else if (line.trim()) {
+      list = null;
+      html.push(`<p>${inline(line.trim())}</p>`);
+    }
+  }
+  node.innerHTML = html.map((p) => (Array.isArray(p) ? `<ul>${p.join("")}</ul>` : p)).join("");
 }
 
 function closeLiveTranscript() {

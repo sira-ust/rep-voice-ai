@@ -599,6 +599,20 @@ input[type="range"]::-moz-range-thumb {
   border-bottom-left-radius: 4px;
 }
 
+/* Replies in proxy mode arrive with light markdown (see renderReply in app.js). */
+.msg-ai strong { font-weight: 650; color: var(--pda-navy); }
+.msg-ai em { color: var(--text-2); }
+.msg-ai mark {
+  background: rgba(232, 180, 92, 0.32);   /* --warn, softened to sit behind text */
+  color: inherit;
+  padding: 0 3px;
+  border-radius: 3px;
+}
+.msg-ai ul { margin: 4px 0; padding-left: 18px; }
+.msg-ai li { margin: 1px 0; }
+.msg-ai p { margin: 0; }
+.msg-ai p + p, .msg-ai p + ul, .msg-ai ul + p { margin-top: 5px; }
+
 .msg-system {
   align-self: center;
   background: none;

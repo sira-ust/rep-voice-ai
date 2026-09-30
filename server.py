@@ -19,6 +19,7 @@ import hmac
 import json
 import mimetypes
 import os
+import re
 import secrets
 import sys
 import threading
@@ -228,6 +229,91 @@ def live_publish_reply(call: str, text: str, start: bool, seq: int = 0) -> None:
         if entry and (not seq or entry["seq"] == seq):
             entry["events"].append({"type": "agent", "text": text, "start": start})
             _live_lock.notify_all()
+
+
+# ------------------------------------------------------------------ screen and voice
+#
+# One reply serves two readers. The page shows it and ElevenLabs speaks it, and
+# a paragraph of spelled-out figures is hard to scan. So the model writes for
+# the screen -- digits, currency, light markdown -- the page shows exactly that,
+# and ElevenLabs gets the same words with the markdown taken out. Figures are
+# left as digits for ElevenLabs to read (text_normalisation_type "elevenlabs"
+# on the agent), which says "$4,210" as a person would.
+#
+# Proxy mode only, so it is added here rather than written into agent_prompt.md:
+# in direct mode ElevenLabs speaks the model's text as it is, markdown and all.
+
+DISPLAY_STYLE = """
+
+## How to write your replies (this overrides earlier guidance on numbers)
+
+Your reply is shown on the rep's screen as well as spoken. The voice is made
+from the same text separately, so write it to be read:
+
+- Numbers as digits, never words: 189 units, 42%, 3 orders.
+- Money with the dollar sign and thousands separators: $4,210, $12.50. Every
+  figure is US dollars. In Chinese, write 4,210美元 rather than using $.
+- Dates short: Sep 22, not the twenty-second of September.
+- Names in ordinary capitals -- New Asian Supermarket Inc, West Allis, Eel
+  W/Teriyaki Glaze -- not the all-capitals the system stores them in.
+- **Bold** account names, item names and the key figure in an answer.
+- *Italics* for a caveat or a hedge, such as *as of Sep 22*.
+- ==Highlight== the one thing the rep must not miss, at most once per reply.
+- Three or more items: a short list, one per line, each starting with "- ".
+- Nothing else: no headings, tables, links, code or emoji.
+
+Keep it as short as you would say it. The formatting helps the eye; it is not
+a reason to write more.
+
+"""
+
+
+def with_display_style(messages: list) -> list:
+    """The conversation with DISPLAY_STYLE added to its system prompt.
+
+    Appended to the existing system message rather than sent as a second one:
+    chat templates differ on whether a second system message is allowed, and
+    a rejected request is a dead turn.
+    """
+    out = [dict(m) for m in messages]
+    for message in out:
+        if message.get("role") == "system" and isinstance(message.get("content"), str):
+            message["content"] += DISPLAY_STYLE
+            return out
+    return [{"role": "system", "content": DISPLAY_STYLE.strip()}] + out
+
+
+_MD_BULLET = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+")
+_MD_MARKS = [
+    (re.compile(r"\*\*(.+?)\*\*"), r"\1"),
+    (re.compile(r"__(.+?)__"), r"\1"),
+    (re.compile(r"==(.+?)=="), r"\1"),
+    (re.compile(r"(?<![\w*])\*(?!\s)(.+?)(?<!\s)\*(?![\w*])"), r"\1"),
+    (re.compile(r"(?<![\w])_(?!\s)(.+?)(?<!\s)_(?![\w])"), r"\1"),
+]
+
+
+def speakable(text: str) -> str:
+    """The same reply without markdown, for the voice.
+
+    List items become sentences: a line break is not a pause to a voice, so an
+    item without closing punctuation gets a full stop, or three items run
+    together into one breathless phrase.
+    """
+    lines = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        bullet = bool(_MD_BULLET.match(line))
+        line = _MD_BULLET.sub("", line)
+        for pattern, repl in _MD_MARKS:
+            line = pattern.sub(repl, line)
+        line = line.replace("**", "").replace("==", "")
+        if bullet and line and line[-1] not in ".!?:;,":
+            line += "."
+        lines.append(line)
+    return " ".join(lines)
 
 
 def last_user_text(messages: list) -> str:
@@ -1055,13 +1141,14 @@ class Handler(BaseHTTPRequestHandler):
             line = " ".join(model_text.split())
             if not line or len(line) > 80 or not line.endswith((".", "!")):
                 line = "Let me check."
-            spoken.append(event(delta({"content": line + " "})))
+            spoken.append(event(delta({"content": speakable(line) + " "})))
             if spoken[0]:
                 live_publish_reply(call, line + " ", start=True, seq=seq)
             return spoken[0]
 
         try:
-            answer = run_llm_with_tools(messages, model, max_tokens, rep, before_lookup)
+            answer = run_llm_with_tools(with_display_style(messages), model, max_tokens,
+                                        rep, before_lookup)
         except UpstreamError as exc:
             sys.stderr.write("  LLM proxy upstream error: %s\n" % exc.message)
             answer = "I'm sorry, I ran into a problem answering that."
@@ -1071,7 +1158,9 @@ class Handler(BaseHTTPRequestHandler):
 
         # The answer itself still arrives whole: the tool loop has to finish
         # before there is anything true to say.
-        sent = event(delta({"content": answer}))
+        # The screen gets the reply as written; the voice gets it without the
+        # markdown, which it would otherwise read out or stumble over.
+        sent = event(delta({"content": speakable(answer)}))
         if sent:
             live_publish_reply(call, answer, start=not spoken, seq=seq)
         if sent and event(delta({}, "stop")) and event("[DONE]"):
