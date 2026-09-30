@@ -208,6 +208,58 @@ def live_publish_user_turn(call: str, text: str) -> int:
         return seq
 
 
+EVIDENCE_TURNS = 6   # earlier turns whose lookups are carried forward
+
+
+def _flat(text: str) -> str:
+    return " ".join((text or "").split())
+
+
+def live_remember(call: str, spoken: str, exchange: list) -> None:
+    """Keep a turn's lookups, keyed by the reply they produced.
+
+    ElevenLabs sends the proxy the conversation as text alone: the rep's words
+    and the agent's earlier replies, never the lookups behind them, which ran
+    here. So on the next turn the model sees its own earlier sentence listing
+    three items with nothing to say which account they belonged to. Asked
+    "yes" to looking at a second store's pitch list, it recited the first
+    store's items as the second's, without looking anything up.
+    with_evidence puts these back where they happened.
+    """
+    if not call or not exchange or not spoken:
+        return
+    with _live_lock:
+        entry = _live_calls.get(call)
+        if entry is not None:
+            kept = entry.setdefault("evidence", [])
+            kept.append({"key": _flat(spoken)[:80], "messages": exchange})
+            del kept[:-EVIDENCE_TURNS]
+
+
+def with_evidence(call: str, messages: list) -> list:
+    """The conversation with each earlier turn's lookups back before its reply.
+
+    A reply is recognised by its opening words, which is how ElevenLabs quotes
+    it back -- whole, or cut short where the rep interrupted.
+    """
+    with _live_lock:
+        entry = _live_calls.get(call) if call else None
+        kept = list((entry or {}).get("evidence") or [])
+    if not kept:
+        return messages
+    out = []
+    for message in messages:
+        if message.get("role") == "assistant" and isinstance(message.get("content"), str):
+            said = _flat(message["content"])
+            for item in kept:
+                if item["key"] and item["key"][:40] in said:
+                    out.extend(item["messages"])
+                    kept.remove(item)
+                    break
+        out.append(message)
+    return out
+
+
 def live_is_current(call: str, seq: int) -> bool:
     """False once a newer request for the same call has arrived."""
     with _live_lock:
@@ -265,6 +317,17 @@ from the same text separately, so write it to be read:
 Keep it as short as you would say it. The formatting helps the eye; it is not
 a reason to write more.
 
+## Where facts come from
+
+Every item, figure, date or status you give for an account must come from a
+lookup result for that same account -- in this turn, or shown earlier in this
+conversation as a tool result. Your own earlier replies are not a source: they
+are what you said, not what the data says.
+
+- A different account from the last one means a new lookup for it. Never
+  reuse one store's items, numbers or status for another.
+- When the rep says yes to something you offered to look up, look it up.
+- If there is no result for what they asked, say you will check, and check.
 """
 
 
@@ -445,7 +508,7 @@ def call_upstream_llm(messages: list, model: str, max_tokens: int, tools: list) 
 
 
 def run_llm_with_tools(messages: list, model: str, max_tokens: int, rep: str = "",
-                       before_lookup=None) -> str:
+                       before_lookup=None, trace: list | None = None) -> str:
     """The tool-calling loop that used to run on ElevenLabs' side: ask the
     model, execute anything it asks for ourselves, feed the result back, and
     repeat until it answers in plain text (or we hit the round cap).
@@ -454,9 +517,20 @@ def run_llm_with_tools(messages: list, model: str, max_tokens: int, rep: str = "
     words the model wrote alongside its tool call. It is how the caller gets
     something said while Databricks works. Returning False means nobody is
     listening any more, and the loop stops rather than run queries for no one.
+
+    `trace`, if given, receives the tool calls and results this turn added to
+    the conversation -- the evidence the answer rests on (see live_remember).
     """
-    tools = [openai_tool_schema(s) for s in tool_specs()]
     history = list(messages)
+    answer = _tool_loop(history, model, max_tokens, rep, before_lookup)
+    if trace is not None:
+        trace.extend(history[len(messages):])
+    return answer
+
+
+def _tool_loop(history: list, model: str, max_tokens: int, rep: str, before_lookup) -> str:
+    """run_llm_with_tools' loop, appending every exchange to `history`."""
+    tools = [openai_tool_schema(s) for s in tool_specs()]
 
     for _ in range(LLM_PROXY_MAX_ROUNDS):
         completion = call_upstream_llm(history, model, max_tokens, tools)
@@ -1130,6 +1204,7 @@ class Handler(BaseHTTPRequestHandler):
         # its tool call ("Let me check their pitch list."); they fit the
         # question better than anything fixed here.
         spoken: list = []
+        exchange: list = []     # this turn's lookups, kept for later turns
 
         def before_lookup(model_text: str) -> bool:
             # Superseded: the rep kept talking and ElevenLabs asked again.
@@ -1147,8 +1222,8 @@ class Handler(BaseHTTPRequestHandler):
             return spoken[0]
 
         try:
-            answer = run_llm_with_tools(with_display_style(messages), model, max_tokens,
-                                        rep, before_lookup)
+            answer = run_llm_with_tools(with_display_style(with_evidence(call, messages)),
+                                        model, max_tokens, rep, before_lookup, exchange)
         except UpstreamError as exc:
             sys.stderr.write("  LLM proxy upstream error: %s\n" % exc.message)
             answer = "I'm sorry, I ran into a problem answering that."
@@ -1163,6 +1238,8 @@ class Handler(BaseHTTPRequestHandler):
         sent = event(delta({"content": speakable(answer)}))
         if sent:
             live_publish_reply(call, answer, start=not spoken, seq=seq)
+            if live_is_current(call, seq):
+                live_remember(call, speakable(answer), exchange)
         if sent and event(delta({}, "stop")) and event("[DONE]"):
             try:
                 self.wfile.write(b"0\r\n\r\n")
