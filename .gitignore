@@ -2,4 +2,5 @@
 __pycache__/
 *.pyc
 .proxy-previous.json
+.proxy-previous.*.json
 .env.test

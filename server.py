@@ -210,6 +210,14 @@ def live_publish_user_turn(call: str, text: str) -> int:
 
 EVIDENCE_TURNS = 6   # earlier turns whose lookups are carried forward
 
+# A lookup still running this long after the last thing said gets another
+# short line, so ElevenLabs (which waits about 15 s) does not drop the turn.
+try:
+    KEEPALIVE_SECS = max(3.0, float(os.environ.get("LLM_PROXY_KEEPALIVE_SECS", "8") or 8))
+except ValueError:
+    KEEPALIVE_SECS = 8.0
+KEEPALIVE_LINES = ("Still checking.", "Almost there.")
+
 
 def _flat(text: str) -> str:
     return " ".join((text or "").split())
@@ -920,13 +928,32 @@ class Handler(BaseHTTPRequestHandler):
         if not entry or entry["user"] != self._user():
             self._json(404, {"error": "No such call."})
             return
+        # Chunked, like the proxy's own stream. This used to be a bare body
+        # ended by closing the connection, which worked on a laptop and never
+        # arrived through the office tunnel: a proxy that cannot see where a
+        # response ends may hold it until it does, and this one never does.
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.send_header("X-Accel-Buffering", "no")
         self.send_header("Connection", "close")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.close_connection = True
+
+        def chunk(data: bytes) -> bool:
+            try:
+                self.wfile.write(b"%x\r\n%s\r\n" % (len(data), data))
+                self.wfile.flush()
+                return True
+            except OSError:
+                return False
+
+        # Something at once, so the stream is visibly open end to end rather
+        # than waiting on the first keep-alive.
+        if not chunk(b": open\n\n"):
+            return
         sent = len(entry["events"])     # history is ElevenLabs' job; only new words
         while time.time() < entry["expires"]:
             with _live_lock:
@@ -934,14 +961,10 @@ class Handler(BaseHTTPRequestHandler):
                     _live_lock.wait(15)
                 fresh = entry["events"][sent:]
                 sent = len(entry["events"])
-            try:
-                for item in fresh:
-                    self.wfile.write(("data: %s\n\n" % json.dumps(item)).encode("utf-8"))
-                if not fresh:
-                    self.wfile.write(b": keep-alive\n\n")
-                self.wfile.flush()
-            except OSError:
+            data = b"".join(("data: %s\n\n" % json.dumps(item)).encode("utf-8") for item in fresh)
+            if not chunk(data or b": keep-alive\n\n"):
                 return
+        chunk(b"")          # the terminating zero-length chunk
 
     def _handle_api(self, route: str, query: dict) -> None:
         agent_id = (query.get("agent_id", [AGENT_ID])[0] or AGENT_ID).strip()
@@ -1172,15 +1195,19 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
         self.send_header("Transfer-Encoding", "chunked")
+        self.send_header("X-Accel-Buffering", "no")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
+
+        write_lock = threading.Lock()   # the keep-alive below writes from its own thread
 
         def event(data: str) -> bool:
             """Write one SSE event as an HTTP chunk; False once the caller has gone."""
             piece = ("data: %s\n\n" % data).encode("utf-8")
             try:
-                self.wfile.write(b"%x\r\n%s\r\n" % (len(piece), piece))
-                self.wfile.flush()
+                with write_lock:
+                    self.wfile.write(b"%x\r\n%s\r\n" % (len(piece), piece))
+                    self.wfile.flush()
                 return True
             except OSError:
                 return False
@@ -1204,6 +1231,7 @@ class Handler(BaseHTTPRequestHandler):
         # its tool call ("Let me check their pitch list."); they fit the
         # question better than anything fixed here.
         spoken: list = []
+        said_at = [0.0]         # when the rep last heard something from this turn
         exchange: list = []     # this turn's lookups, kept for later turns
 
         def before_lookup(model_text: str) -> bool:
@@ -1217,10 +1245,34 @@ class Handler(BaseHTTPRequestHandler):
             if not line or len(line) > 80 or not line.endswith((".", "!")):
                 line = "Let me check."
             spoken.append(event(delta({"content": speakable(line) + " "})))
+            said_at[0] = time.time()
             if spoken[0]:
                 live_publish_reply(call, line + " ", start=True, seq=seq)
             return spoken[0]
 
+        # ElevenLabs gives up on a reply when nothing new arrives for about 15
+        # seconds, and the rep hears "Let me check." and then nothing. A slow
+        # lookup is enough: served from the office, a two-lookup turn took 14
+        # seconds between "Let me check." and the answer. So while a lookup is
+        # still running, say a little more every KEEPALIVE_SECS -- only once
+        # something has been said, and only a couple of times.
+        finished = threading.Event()
+
+        def keep_alive() -> None:
+            lines = list(KEEPALIVE_LINES)
+            while lines and not finished.wait(0.5):
+                # Counted from the last thing said, not from the request.
+                if not spoken or not spoken[0] or time.time() - said_at[0] < KEEPALIVE_SECS:
+                    continue
+                if not live_is_current(call, seq):
+                    return
+                line = lines.pop(0)
+                if finished.is_set() or not event(delta({"content": line + " "})):
+                    return
+                said_at[0] = time.time()
+                live_publish_reply(call, line + " ", start=False, seq=seq)
+
+        threading.Thread(target=keep_alive, daemon=True).start()
         try:
             answer = run_llm_with_tools(with_display_style(with_evidence(call, messages)),
                                         model, max_tokens, rep, before_lookup, exchange)
@@ -1231,6 +1283,7 @@ class Handler(BaseHTTPRequestHandler):
             sys.stderr.write("  LLM proxy error: %s: %s\n" % (type(exc).__name__, exc))
             answer = "I'm sorry, I ran into a problem answering that."
 
+        finished.set()
         # The answer itself still arrives whole: the tool loop has to finish
         # before there is anything true to say.
         # The screen gets the reply as written; the voice gets it without the

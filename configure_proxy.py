@@ -45,6 +45,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
 
 import common  # loads .env on import
 
@@ -64,7 +65,20 @@ DBX_SECRET_NAME = os.environ.get("DATABRICKS_SECRET_NAME", "DATABRICKS_BEARER").
 # in front of the LLM insists on. Neither is reconstructable from anything
 # here, and dropping them left the agent authenticating to the LLM with the
 # proxy's own bearer -- every call failed, for a reason nothing reported.
-STATE_FILE = common.ROOT / ".proxy-previous.json"
+#
+# One file per agent, named by its id. A single shared file meant switching a
+# second agent found one already there and kept it rather than overwrite it --
+# "running --on twice" and "running --on for a different agent" looked
+# identical from here, so the second agent's --off would have restored
+# whatever the first agent's settings happened to be.
+def state_file(agent_id: str) -> Path:
+    safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in agent_id)
+    return common.ROOT / (".proxy-previous.%s.json" % safe)
+
+
+# The old shared name, read once to migrate anyone's existing rollback point
+# to the new per-agent file rather than silently losing it.
+_LEGACY_STATE_FILE = common.ROOT / ".proxy-previous.json"
 
 
 FORCE = False
@@ -208,19 +222,26 @@ def turn_on(base_url: str) -> None:
     print("  secret    : %s (%s)" % (PROXY_SECRET_NAME, secret_id))
 
     before = agent()
-    if STATE_FILE.is_file():
+    state = state_file(AGENT_ID)
+    if state.is_file():
         # Running --on twice would record the proxy settings as the thing to
         # go back to, leaving --off restoring a tunnel that no longer exists.
         # The first save is the one worth keeping.
-        print("  kept      : existing rollback point in %s" % STATE_FILE.name)
-    previous = prompt_of(before)
-    if not STATE_FILE.is_file():
-        STATE_FILE.write_text(json.dumps({
+        print("  kept      : existing rollback point in %s" % state.name)
+    else:
+        if _LEGACY_STATE_FILE.is_file():
+            # Pre-per-agent versions of this script shared one file across
+            # every agent, so it cannot be trusted to belong to this one --
+            # using it here is the exact bug this file is keyed to avoid.
+            print("  note      : %s exists from an older version of this script and is"
+                  " ignored" % _LEGACY_STATE_FILE.name)
+        previous = prompt_of(before)
+        state.write_text(json.dumps({
         "custom_llm": previous.get("custom_llm") or {},
         "llm": previous.get("llm"),
         "tool_ids": previous.get("tool_ids") or [],
         }, indent=2), encoding="utf-8")
-        print("  saved     : rollback point -> %s" % STATE_FILE.name)
+        print("  saved     : rollback point -> %s" % state.name)
 
     el("/convai/agents/" + urllib.parse.quote(AGENT_ID), "PATCH",
        {"conversation_config": {"agent": {"prompt": {
@@ -260,16 +281,17 @@ def turn_on(base_url: str) -> None:
 
 
 def turn_off() -> None:
-    if not STATE_FILE.is_file():
+    state = state_file(AGENT_ID)
+    if not state.is_file():
         raise Fail("No saved settings (%s). --off restores what --on recorded; "
                    "without it, put the agent back with:\n"
                    "      python configure_llm.py --apply\n"
-                   "      python databricks_tool.py --sync" % STATE_FILE.name)
+                   "      python databricks_tool.py --sync" % state.name)
     guard_not_production(agent(), "--off")
-    saved = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    saved = json.loads(state.read_text(encoding="utf-8"))
     custom = saved.get("custom_llm") or {}
     if not custom.get("url"):
-        raise Fail("%s records no previous url" % STATE_FILE.name)
+        raise Fail("%s records no previous url" % state.name)
 
     print("\n  Restoring the agent to %s" % custom.get("url"))
     el("/convai/agents/" + urllib.parse.quote(AGENT_ID), "PATCH",
@@ -279,7 +301,7 @@ def turn_off() -> None:
            "tool_ids": saved.get("tool_ids") or [],
        }}}})
     print("  restored  : %d webhook tool(s)" % len(saved.get("tool_ids") or []))
-    STATE_FILE.unlink()
+    state.unlink()
     # Those tools authenticate with a secret --on may have deleted, in which
     # case they are pointing at nothing until it is recreated. Say so plainly:
     # a restored tool that quietly fails is worse than one that is obviously
