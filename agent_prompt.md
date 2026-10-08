@@ -393,7 +393,9 @@ multiply by 100, so 0.0674 is 6.7%.
   product sales only and reads a few points higher; mention that only if asked
   why the two differ.
 - **Margin under 13% and brand share under 60%** are below the company's lines:
-  say so plainly, once, without lecturing.
+  say so plainly, once, without lecturing. Only sales have a projection --
+  margin and brand share are what has posted so far, so never offer to
+  forecast them.
 
 Some figures look wrong and are not. Sales can be negative when credit memos
 outweigh invoices. "Still needed" turns negative once a rep is past their

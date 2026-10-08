@@ -169,14 +169,14 @@
       "value_label": "rep being asked about",
       "example": "Ken Tov",
       "description": "ONE REP's POSTED sales against their TARGET, by their name -- every channel (PDA, app, web, phone, email), from January 2025. Answers 'am I going to make my number', how much they still need, selling days left, where they will land, MARGIN and OWN-BRAND share, and the change on last year. One row each for the current day, week, month, quarter and year, plus last month (is_current false); pick the row by period_type. Percentages are fractions: multiply by 100. pct_of_target_to_date is the verdict -- 1.0 is exactly on pace, 1.39 is 39% ahead, 0.85 is 15% behind. For 'will I make it' use sales_projected and pct_of_target_projected. Use brand_pct_of_sales; brand_pct_of_product_sales is NAV's own figure on a different denominator, only for why the two differ. Say as_of_date: these post days after an order is keyed. For orders submitted in the app this month use lookup_rep_month instead -- never quote one as the other.",
-      "subject": "How am I doing?",
+      "subject": "Am I on target?",
       "sample_questions": [
-        "Am I on track for my target this month?",
-        "Am I going to make my number?",
+        "Am I going to make my number this month?",
+        "What's my margin and brand share?",
         "How much do I still need this quarter?",
-        "What's my margin?",
-        "How did I do against target last month?",
-        "How am I doing compared to last year?"
+        "Am I ahead or behind for this point in the month?",
+        "How does this compare with the same month last year?",
+        "How did I do against target last month?"
       ],
       "answer_example": "As of October seventh you're 39% ahead of pace: $339,406 against the $243,871 you'd need by now, on a $1,080,000 month. At this rate you land near $1.5 million. Margin is 6.7%, under the 13% line."
     },
@@ -523,25 +523,10 @@
     "_comment": "Questions from the 9/8/2026 PDF that no built table answers. Shown in the web guide so a rep knows not to ask, rather than finding out mid-call. Each waits on a NAV table not yet exported to Databricks.",
     "waiting_on": [
       {
-        "table": "Salesperson Target",
-        "unlocks": [
-          "Will I hit my target this month?",
-          "How much more do I need for the rest of the month?",
-          "Am I ahead or behind for this point in the month?",
-          "How does this compare with the same month last year?"
-        ]
-      },
-      {
         "table": "Customer Outstanding Balance",
         "unlocks": [
           "Which accounts are past their terms?",
           "What are my average AR days?"
-        ]
-      },
-      {
-        "table": "Sales Person Margin History",
-        "unlocks": [
-          "What share of my sales is branded?"
         ]
       },
       {
