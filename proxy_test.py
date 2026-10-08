@@ -27,6 +27,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -50,12 +51,38 @@ def wait_for(port: int, seconds: float = 25.0) -> bool:
     return False
 
 
-def ask(port: int, messages: list, rep: str, secret: str, model: str) -> str:
+def call_scope(port: int, rep: str) -> str:
+    """A scope token for one conversation, minted the way the page mints it.
+
+    It has to come from the server rather than be signed here: the token
+    carries a call id the server registers, and that id is what lets the proxy
+    put each turn's earlier lookups back into the conversation. Signing one
+    locally left every follow-up question answered with no data in front of
+    the model -- it invented a quarter's "still needed", a margin and last
+    month's result, none of them from the table -- which is not what a real
+    call does, so the test was testing something else.
+    """
+    user = next(iter(auth.users()), "")
+    if user:
+        cookie = "%s=%s" % (auth.SESSION_COOKIE, auth.issue_session(user))
+        req = urllib.request.Request(
+            "http://127.0.0.1:%d/api/scope?rep=%s" % (port, urllib.parse.quote(rep)),
+            headers={"Cookie": cookie})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read().decode("utf-8"))["scopeToken"]
+        except Exception as exc:  # noqa: BLE001 - fall back, but say so
+            print("  could not mint a call (%s); follow-ups will not see earlier "
+                  "lookups" % exc)
+    return auth.issue_scope(rep)
+
+
+def ask(port: int, messages: list, scope: str, secret: str, model: str) -> str:
     body = json.dumps({
         "model": model,
         "max_tokens": 512,
         "messages": messages,
-        "scope_token": auth.issue_scope(rep),
+        "scope_token": scope,
     }).encode("utf-8")
     req = urllib.request.Request(
         "http://127.0.0.1:%d/llm/v1/chat/completions" % port,
@@ -121,11 +148,12 @@ def main() -> int:
     messages = [{"role": "system", "content": system}]
     failed = False
     try:
+        scope = call_scope(port, args.rep)
         for turn in turns:
             print("  you   : %s" % turn)
             messages.append({"role": "user", "content": turn})
             try:
-                answer = ask(port, messages, args.rep, secret, model)
+                answer = ask(port, messages, scope, secret, model)
             except urllib.error.HTTPError as exc:
                 print("  HTTP %s: %s\n" % (exc.code, exc.read().decode()[:200]))
                 failed = True
