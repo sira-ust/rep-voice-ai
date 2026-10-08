@@ -52,7 +52,13 @@
       "label": "How a rep is doing",
       "about": "A rep's current month: orders submitted, total and average order value, their largest order, how many accounts ordered, a projection of where the month lands at this pace, and the same figures for the month before.",
       "grain": "current month per rep, stamped with the day it was built",
-      "not_covered": "There is no target to compare against, so it cannot say whether a rep will hit their number. No margin, no branded share, no commission. These are orders submitted, not invoiced sales, and the two never tie out exactly."
+      "not_covered": "No target, margin or branded share -- those are in mart_rep_period_sales. No commission. These are orders submitted through the app, not invoiced sales, and the two never tie out exactly."
+    },
+    "ust_databricks.ust_reporting.mart_rep_period_sales": {
+      "label": "A rep against their target",
+      "about": "A rep's invoiced sales for this week, month, quarter and year, and last month: the target, how far along they are against it, what is still needed and how many selling days are left, where they are on pace to land, margin, own-brand share of sales against the company's thresholds, and the change on the same stretch last year.",
+      "grain": "one row per rep and period, from NAV's posted sales and targets, stamped with the newest posting date",
+      "not_covered": "Posted (invoiced) sales, not orders submitted, so it trails the app by a day or more and never ties out exactly with lookup_rep_month. No commission. Last year's figures start in 2026, because the feed begins on 2025-01-02."
     },
     "ust_databricks.ust_dims.dim_items": {
       "label": "Product catalogue",
@@ -88,7 +94,7 @@
       "label": "What a month was made of",
       "about": "A rep's invoiced month broken down: lines, distinct items and categories, the share that were promotional or new items, and the rate at which lines came back.",
       "grain": "current month per rep, stamped with the day it was built",
-      "not_covered": "Share of lines is sound; share of value rests on the same late-2026 pricing gap as everything else, and across the reps only about fifteen percent of lines are priced, so read the coverage figure before quoting a value share. There is no branded share here -- that needs a table that has not landed."
+      "not_covered": "Share of lines is sound; share of value rests on the same late-2026 pricing gap as everything else, and across the reps only about fifteen percent of lines are priced, so read the coverage figure before quoting a value share. There is no branded share here -- a rep's own-brand share for a period is in mart_rep_period_sales (lookup_rep_sales)."
     }
   },
   "tools": [
@@ -123,6 +129,48 @@
         "Where will I land by month end?"
       ],
       "answer_example": "A hundred and fifty-six orders so far this month, about two million dollars, across seventy-seven accounts. At this pace you land near two point seven."
+    },
+    {
+      "name": "lookup_rep_sales",
+      "table": "ust_databricks.ust_reporting.mart_rep_period_sales",
+      "lookup_column": "rep_name",
+      "match": "contains",
+      "columns": [
+        "period_type",
+        "period_start",
+        "is_current",
+        "as_of_date",
+        "sales_amount",
+        "has_target",
+        "period_target",
+        "pct_of_target_to_date",
+        "sales_still_needed",
+        "target_days_remaining",
+        "sales_projected",
+        "pct_of_target_projected",
+        "margin_pct",
+        "margin_below_target",
+        "brand_pct_of_sales",
+        "brand_below_target",
+        "sales_change_pct_vs_prev_year"
+      ],
+      "filters": [
+        "period_type IN ('week', 'month', 'quarter', 'year')",
+        "(is_current OR (period_type = 'month' AND period_start = add_months(date_trunc('month', as_of_date), -1)))"
+      ],
+      "order_by": "CASE period_type WHEN 'week' THEN 1 WHEN 'month' THEN 2 WHEN 'quarter' THEN 3 ELSE 4 END, period_start DESC",
+      "limit": 6,
+      "value_label": "rep being asked about",
+      "example": "Ken Tov",
+      "description": "ONE REP's invoiced sales against their TARGET, by their name: whether they are on track, how much they still need, how many selling days are left, where they will land, their MARGIN and OWN-BRAND share. One row each for the current week, month, quarter and year, plus last month (is_current false). Use for targets, quota, pace, margin, brand share, or how a rep compares with last year. Percentages are fractions: 1.39 means 139%. pct_of_target_to_date is the one to read out -- 1.0 is exactly on pace. margin_below_target and brand_below_target say whether they are under the company's 13% margin and 60% brand thresholds. Say as_of_date: these are posted sales and trail the app. For orders submitted this month use lookup_rep_month.",
+      "subject": "How am I doing?",
+      "sample_questions": [
+        "Am I on track for my target this month?",
+        "How much do I still need this quarter?",
+        "What's my margin?",
+        "How did I do against target last month?"
+      ],
+      "answer_example": "As of October seventh you're at 139% of pace for the month: $339,406 against a $1,080,000 target, with 24 selling days left. Margin is 6.7%, under the 13% line."
     },
     {
       "name": "lookup_biggest_orders",
