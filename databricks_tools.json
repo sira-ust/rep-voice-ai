@@ -56,9 +56,9 @@
     },
     "ust_databricks.ust_reporting.mart_rep_period_sales": {
       "label": "A rep against their target",
-      "about": "A rep's invoiced sales for this week, month, quarter and year, and last month: the target, how far along they are against it, what is still needed and how many selling days are left, where they are on pace to land, margin, own-brand share of sales against the company's thresholds, and the change on the same stretch last year.",
-      "grain": "one row per rep and period, from NAV's posted sales and targets, stamped with the newest posting date",
-      "not_covered": "Posted (invoiced) sales, not orders submitted, so it trails the app by a day or more and never ties out exactly with lookup_rep_month. No commission. Last year's figures start in 2026, because the feed begins on 2025-01-02."
+      "about": "A rep's posted sales from NAV, every channel (PDA, app, web, phone, email), for today, this week, month, quarter and year, and last month: the target, pace against the days gone, what is still needed and the selling days left, where they are on pace to land, margin, gross profit, own-brand share against the company's 60% and 13% lines, and the change on the same stretch last year.",
+      "grain": "one row per rep and period, history from January 2025, stamped with the newest posting date",
+      "not_covered": "Posted sales, not orders submitted: an order keyed on the 30th is in that month's orders and next month's posted sales, so it never ties out with lookup_rep_month. No commission, AR days, balances, terms or credit warnings; no per-store target and no brand share for a single order; nothing before January 2025, and no last-year comparison before 2026. A rep without a name in the app cannot be looked up."
     },
     "ust_databricks.ust_dims.dim_items": {
       "label": "Product catalogue",
@@ -140,37 +140,45 @@
         "period_start",
         "is_current",
         "as_of_date",
-        "sales_amount",
+        "round(sales_amount) AS sales_amount",
         "has_target",
-        "period_target",
+        "round(period_target) AS period_target",
+        "round(target_to_date) AS target_to_date",
         "pct_of_target_to_date",
-        "sales_still_needed",
+        "round(sales_still_needed) AS sales_still_needed",
         "target_days_remaining",
-        "sales_projected",
+        "round(sales_projected) AS sales_projected",
         "pct_of_target_projected",
         "margin_pct",
+        "round(gross_profit) AS gross_profit",
         "margin_below_target",
         "brand_pct_of_sales",
+        "brand_pct_of_product_sales",
         "brand_below_target",
-        "sales_change_pct_vs_prev_year"
+        "round(prev_year_sales_to_date) AS prev_year_sales_to_date",
+        "sales_change_pct_vs_prev_year",
+        "accounts_sold",
+        "document_count"
       ],
       "filters": [
-        "period_type IN ('week', 'month', 'quarter', 'year')",
+        "period_type IN ('day', 'week', 'month', 'quarter', 'year')",
         "(is_current OR (period_type = 'month' AND period_start = add_months(date_trunc('month', as_of_date), -1)))"
       ],
-      "order_by": "CASE period_type WHEN 'week' THEN 1 WHEN 'month' THEN 2 WHEN 'quarter' THEN 3 ELSE 4 END, period_start DESC",
-      "limit": 6,
+      "order_by": "CASE period_type WHEN 'day' THEN 0 WHEN 'week' THEN 1 WHEN 'month' THEN 2 WHEN 'quarter' THEN 3 ELSE 4 END, period_start DESC",
+      "limit": 7,
       "value_label": "rep being asked about",
       "example": "Ken Tov",
-      "description": "ONE REP's invoiced sales against their TARGET, by their name: whether they are on track, how much they still need, how many selling days are left, where they will land, their MARGIN and OWN-BRAND share. One row each for the current week, month, quarter and year, plus last month (is_current false). Use for targets, quota, pace, margin, brand share, or how a rep compares with last year. Percentages are fractions: 1.39 means 139%. pct_of_target_to_date is the one to read out -- 1.0 is exactly on pace. margin_below_target and brand_below_target say whether they are under the company's 13% margin and 60% brand thresholds. Say as_of_date: these are posted sales and trail the app. For orders submitted this month use lookup_rep_month.",
+      "description": "ONE REP's POSTED sales against their TARGET, by their name -- every channel (PDA, app, web, phone, email), from January 2025. Answers 'am I going to make my number', how much they still need, selling days left, where they will land, MARGIN and OWN-BRAND share, and the change on last year. One row each for the current day, week, month, quarter and year, plus last month (is_current false); pick the row by period_type. Percentages are fractions: multiply by 100. pct_of_target_to_date is the verdict -- 1.0 is exactly on pace, 1.39 is 39% ahead, 0.85 is 15% behind. For 'will I make it' use sales_projected and pct_of_target_projected. Use brand_pct_of_sales; brand_pct_of_product_sales is NAV's own figure on a different denominator, only for why the two differ. Say as_of_date: these post days after an order is keyed. For orders submitted in the app this month use lookup_rep_month instead -- never quote one as the other.",
       "subject": "How am I doing?",
       "sample_questions": [
         "Am I on track for my target this month?",
+        "Am I going to make my number?",
         "How much do I still need this quarter?",
         "What's my margin?",
-        "How did I do against target last month?"
+        "How did I do against target last month?",
+        "How am I doing compared to last year?"
       ],
-      "answer_example": "As of October seventh you're at 139% of pace for the month: $339,406 against a $1,080,000 target, with 24 selling days left. Margin is 6.7%, under the 13% line."
+      "answer_example": "As of October seventh you're 39% ahead of pace: $339,406 against the $243,871 you'd need by now, on a $1,080,000 month. At this rate you land near $1.5 million. Margin is 6.7%, under the 13% line."
     },
     {
       "name": "lookup_biggest_orders",
