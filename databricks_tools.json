@@ -155,8 +155,8 @@
         "brand_pct_of_sales",
         "brand_pct_of_product_sales",
         "brand_below_target",
-        "round(prev_year_sales_to_date) AS prev_year_sales_to_date",
-        "sales_change_pct_vs_prev_year",
+        "round(prev_year_sales_to_date) AS last_year_same_days_sales",
+        "sales_change_pct_vs_prev_year AS change_vs_same_days_last_year",
         "accounts_sold",
         "document_count"
       ],
@@ -168,7 +168,7 @@
       "limit": 7,
       "value_label": "rep being asked about",
       "example": "Ken Tov",
-      "description": "ONE REP's POSTED sales against their TARGET, by their name -- every channel (PDA, app, web, phone, email), from January 2025. Answers 'am I going to make my number', how much they still need, selling days left, where they will land, MARGIN and OWN-BRAND share, and the change on last year. One row each for the current day, week, month, quarter and year, plus last month (is_current false); pick the row by period_type. Percentages are fractions: multiply by 100. pct_of_target_to_date is the verdict -- 1.0 is exactly on pace, 1.39 is 39% ahead, 0.85 is 15% behind. For 'will I make it' use sales_projected and pct_of_target_projected. Use brand_pct_of_sales; brand_pct_of_product_sales is NAV's own figure on a different denominator, only for why the two differ. Say as_of_date: these post days after an order is keyed. For orders submitted in the app this month use lookup_rep_month instead -- never quote one as the other.",
+      "description": "Each row carries in_words: the period already read correctly -- pace, projection, what is still needed, how a finished month ended, the same days last year, margin and brand share. The current month also carries vs_last_month, the comparison with last month already made. Answer from in_words and vs_last_month; do not work comparisons out from the other columns. ONE REP's POSTED sales against their TARGET, by their name -- every channel (PDA, app, web, phone, email), from January 2025. Answers 'am I going to make my number', how much they still need, selling days left, where they will land, MARGIN and OWN-BRAND share, and the change on last year. One row each for the current day, week, month, quarter and year, plus LAST MONTH (period_type month, is_current false) -- a finished month, whose pct_of_target_to_date is how it FINISHED against its target. change_vs_same_days_last_year compares a row with the same days a YEAR earlier, never with last month. Percentages are fractions: multiply by 100. pct_of_target_to_date is the verdict -- 1.0 is exactly on pace, 1.39 is 39% ahead, 0.85 is 15% behind. For 'will I make it' use sales_projected and pct_of_target_projected. Use brand_pct_of_sales; brand_pct_of_product_sales is NAV's own figure on a different denominator, only for why the two differ. Say as_of_date: these post days after an order is keyed. For orders submitted in the app this month use lookup_rep_month instead -- never quote one as the other.",
       "subject": "Am I on target?",
       "sample_questions": [
         "Am I going to make my number this month?",
