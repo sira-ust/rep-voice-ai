@@ -487,9 +487,146 @@ def run_tool_call(name: str, value: str, rep: str = "") -> str:
                                     "outside what %s can see. Say so plainly and name "
                                     "the rep who owns it if one is given." % (rep or "you")),
                     })
-        return json.dumps({"row_count": len(rows), "rows": labelled_rows(cols, rows)})
+        records = labelled_rows(cols, rows)
+        reader = ROW_READERS.get(name)
+        if reader:
+            for record in records:
+                try:
+                    record["in_words"] = reader(record)
+                except (TypeError, ValueError, KeyError):
+                    pass        # leave the row as it is rather than fail the lookup
+        if name == "lookup_rep_sales":
+            add_vs_last_month(records)
+        return json.dumps({"row_count": len(records), "rows": records})
     except common.Fail as exc:
         return json.dumps({"error": str(exc)})
+
+
+def _num(value):
+    return None if value in (None, "") else float(value)
+
+
+def _money(value) -> str:
+    return "${:,.0f}".format(_num(value))
+
+
+def _pct(value, places: int | None = None) -> str:
+    """0.0674 -> '6.7%', 1.2485 -> '125%'; `places` fixes the decimals."""
+    v = _num(value) * 100
+    if places is not None:
+        return "%.*f%%" % (places, v)
+    return ("%.1f%%" % v) if abs(v) < 10 else ("%.0f%%" % v)
+
+
+def read_rep_sales(r: dict) -> str:
+    """One period row of lookup_rep_sales as the sentence it should become.
+
+    Left to the raw columns, the model compared the wrong things: October's
+    first week against all of September, and last year's change read out as
+    the change from last month -- in different ways on different runs, however
+    the prompt put it. Working the comparison out here, where it is arithmetic,
+    leaves the model a sentence to repeat rather than a table to interpret.
+    """
+    import datetime
+    kind = r["period_type"]
+    start = datetime.date.fromisoformat(r["period_start"])
+    current = str(r.get("is_current")).lower() == "true"
+    names = {"day": "%s %d" % (start.strftime("%b"), start.day),
+             "week": "the week of %s %d" % (start.strftime("%b"), start.day),
+             "month": start.strftime("%B %Y"),
+             "quarter": "Q%d %d" % ((start.month - 1) // 3 + 1, start.year),
+             "year": str(start.year)}
+    label = names.get(kind, kind)
+    as_of_day = datetime.date.fromisoformat(r["as_of_date"])
+    as_of = "%s %d" % (as_of_day.strftime("%b"), as_of_day.day)
+    parts = []
+    has_target = str(r.get("has_target")).lower() == "true" and _num(r.get("period_target"))
+    sales = _money(r["sales_amount"])
+    if current:
+        head = (("%s, the latest day posted: %s sold" % (label, sales)) if kind == "day" else
+                ("%s so far (as of %s): %s sold" % (label, as_of, sales)))
+        if has_target:
+            pace = _num(r["pct_of_target_to_date"])
+            if pace is not None:
+                gap = abs(pace - 1) * 100
+                verdict = ("right on pace" if gap < 0.5 else
+                           "%s %s pace" % (_pct(abs(pace - 1)), "ahead of" if pace > 1 else "behind"))
+                head += ", %s against a %s target" % (verdict, _money(r["period_target"]))
+            if _num(r.get("sales_projected")) is not None and kind != "day":
+                head += "; projected to finish at %s, %s of target" % (
+                    _money(r["sales_projected"]), _pct(r["pct_of_target_projected"]))
+            needed = _num(r.get("sales_still_needed"))
+            if needed is not None and kind != "day":
+                head += ("; %s still needed with %s selling days left" % (_money(needed), r.get("target_days_remaining"))
+                         if needed > 0 else "; already %s over target" % _money(-needed))
+        else:
+            head += ", with no target set for this period"
+        parts.append(head)
+    else:
+        head = "%s, finished: %s sold" % (label, sales)
+        if has_target:
+            done = _num(r["pct_of_target_to_date"])
+            over = done - 1
+            head += " against a %s target, %s" % (
+                _money(r["period_target"]),
+                "right on target" if abs(over) < 0.005 else
+                "%s %s target" % (_pct(abs(over)), "over" if over > 0 else "under"))
+        parts.append(head)
+    change = _num(r.get("change_vs_same_days_last_year"))
+    parts.append("compared with the same days a year earlier (%s): %s" % (
+        _money(r["last_year_same_days_sales"]) if _num(r.get("last_year_same_days_sales")) is not None else "n/a",
+        "no figure for last year" if change is None else
+        "%s %s" % (_pct(abs(change)), "up" if change > 0 else "down")))
+    if _num(r.get("margin_pct")) is not None:
+        parts.append("margin %s%s, own-brand share %s%s" % (
+            _pct(r["margin_pct"], 1), " (under the 13% line)" if str(r.get("margin_below_target")).lower() == "true" else "",
+            _pct(r["brand_pct_of_sales"], 1), " (under the 60% line)" if str(r.get("brand_below_target")).lower() == "true" else "")
+            + " -- what has posted so far; margin and brand share have no projection, so never offer one")
+    return "; ".join(parts) + "."
+
+
+def add_vs_last_month(records: list) -> None:
+    """Give the current month a ready-made comparison with last month.
+
+    "Compare me with last month" spans two rows, a month in progress and a
+    finished one, and the model kept joining them wrongly -- a week of
+    October against all of September, or last year's change read out as the
+    change from last month. The like-for-like comparison is how each stands
+    against its own target, so that is what is written here.
+    """
+    import datetime
+    months = [r for r in records if r.get("period_type") == "month"]
+    now = next((r for r in months if str(r.get("is_current")).lower() == "true"), None)
+    last = next((r for r in months if str(r.get("is_current")).lower() != "true"), None)
+    if not now or not last:
+        return
+    try:
+        name_now = datetime.date.fromisoformat(now["period_start"]).strftime("%B")
+        name_last = datetime.date.fromisoformat(last["period_start"]).strftime("%B")
+        finished, pace = _num(last["pct_of_target_to_date"]), _num(now["pct_of_target_to_date"])
+        if finished is None or pace is None:
+            return
+        def side(v, done):
+            gap = abs(v - 1)
+            if gap < 0.005:
+                return "right on target" if done else "right on pace"
+            if done:
+                return "%s %s target" % (_pct(gap), "over" if v > 1 else "under")
+            return "%s %s pace" % (_pct(gap), "ahead of" if v > 1 else "behind")
+        text = ("%s finished %s (%s sold); %s is %s so far" %
+                (name_last, side(finished, True), _money(last["sales_amount"]), name_now, side(pace, False)))
+        if _num(now.get("sales_projected")) is not None:
+            text += ", projected to finish at %s against %s's %s" % (
+                _money(now["sales_projected"]), name_last, _money(last["sales_amount"]))
+        now["vs_last_month"] = text + ". There is no percentage change from last month: do not compare " \
+                                      "this month's sales so far with last month's total."
+    except (TypeError, ValueError, KeyError):
+        pass
+
+
+# Lookups whose rows get a plain-language reading added before the model sees
+# them -- where the raw columns proved easy to misread.
+ROW_READERS = {"lookup_rep_sales": read_rep_sales}
 
 
 _DECIMAL = re.compile(r"-?\d+\.\d+")
