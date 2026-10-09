@@ -52,7 +52,13 @@
       "label": "How a rep is doing",
       "about": "A rep's current month: orders submitted, total and average order value, their largest order, how many accounts ordered, a projection of where the month lands at this pace, and the same figures for the month before.",
       "grain": "current month per rep, stamped with the day it was built",
-      "not_covered": "There is no target to compare against, so it cannot say whether a rep will hit their number. No margin, no branded share, no commission. These are orders submitted, not invoiced sales, and the two never tie out exactly."
+      "not_covered": "No target, margin or branded share -- those are in mart_rep_period_sales. No commission. These are orders submitted through the app, not invoiced sales, and the two never tie out exactly."
+    },
+    "ust_databricks.ust_reporting.mart_rep_period_sales": {
+      "label": "A rep against their target",
+      "about": "A rep's posted sales from NAV, every channel (PDA, app, web, phone, email), for today, this week, month, quarter and year, and last month: the target, pace against the days gone, what is still needed and the selling days left, where they are on pace to land, margin, gross profit, own-brand share against the company's 60% and 13% lines, and the change on the same stretch last year.",
+      "grain": "one row per rep and period, history from January 2025, stamped with the newest posting date",
+      "not_covered": "Posted sales, not orders submitted: an order keyed on the 30th is in that month's orders and next month's posted sales, so it never ties out with lookup_rep_month. No commission, AR days, balances, terms or credit warnings; no per-store target and no brand share for a single order; nothing before January 2025, and no last-year comparison before 2026. A rep without a name in the app cannot be looked up."
     },
     "ust_databricks.ust_dims.dim_items": {
       "label": "Product catalogue",
@@ -88,7 +94,7 @@
       "label": "What a month was made of",
       "about": "A rep's invoiced month broken down: lines, distinct items and categories, the share that were promotional or new items, and the rate at which lines came back.",
       "grain": "current month per rep, stamped with the day it was built",
-      "not_covered": "Share of lines is sound; share of value rests on the same late-2026 pricing gap as everything else, and across the reps only about fifteen percent of lines are priced, so read the coverage figure before quoting a value share. There is no branded share here -- that needs a table that has not landed."
+      "not_covered": "Share of lines is sound; share of value rests on the same late-2026 pricing gap as everything else, and across the reps only about fifteen percent of lines are priced, so read the coverage figure before quoting a value share. There is no branded share here -- a rep's own-brand share for a period is in mart_rep_period_sales (lookup_rep_sales)."
     }
   },
   "tools": [
@@ -123,6 +129,56 @@
         "Where will I land by month end?"
       ],
       "answer_example": "A hundred and fifty-six orders so far this month, about two million dollars, across seventy-seven accounts. At this pace you land near two point seven."
+    },
+    {
+      "name": "lookup_rep_sales",
+      "table": "ust_databricks.ust_reporting.mart_rep_period_sales",
+      "lookup_column": "rep_name",
+      "match": "contains",
+      "columns": [
+        "period_type",
+        "period_start",
+        "is_current",
+        "as_of_date",
+        "round(sales_amount) AS sales_amount",
+        "has_target",
+        "round(period_target) AS period_target",
+        "round(target_to_date) AS target_to_date",
+        "pct_of_target_to_date",
+        "round(sales_still_needed) AS sales_still_needed",
+        "target_days_remaining",
+        "round(sales_projected) AS sales_projected",
+        "pct_of_target_projected",
+        "margin_pct",
+        "round(gross_profit) AS gross_profit",
+        "margin_below_target",
+        "brand_pct_of_sales",
+        "brand_pct_of_product_sales",
+        "brand_below_target",
+        "round(prev_year_sales_to_date) AS prev_year_sales_to_date",
+        "sales_change_pct_vs_prev_year",
+        "accounts_sold",
+        "document_count"
+      ],
+      "filters": [
+        "period_type IN ('day', 'week', 'month', 'quarter', 'year')",
+        "(is_current OR (period_type = 'month' AND period_start = add_months(date_trunc('month', as_of_date), -1)))"
+      ],
+      "order_by": "CASE period_type WHEN 'day' THEN 0 WHEN 'week' THEN 1 WHEN 'month' THEN 2 WHEN 'quarter' THEN 3 ELSE 4 END, period_start DESC",
+      "limit": 7,
+      "value_label": "rep being asked about",
+      "example": "Ken Tov",
+      "description": "ONE REP's POSTED sales against their TARGET, by their name -- every channel (PDA, app, web, phone, email), from January 2025. Answers 'am I going to make my number', how much they still need, selling days left, where they will land, MARGIN and OWN-BRAND share, and the change on last year. One row each for the current day, week, month, quarter and year, plus last month (is_current false); pick the row by period_type. Percentages are fractions: multiply by 100. pct_of_target_to_date is the verdict -- 1.0 is exactly on pace, 1.39 is 39% ahead, 0.85 is 15% behind. For 'will I make it' use sales_projected and pct_of_target_projected. Use brand_pct_of_sales; brand_pct_of_product_sales is NAV's own figure on a different denominator, only for why the two differ. Say as_of_date: these post days after an order is keyed. For orders submitted in the app this month use lookup_rep_month instead -- never quote one as the other.",
+      "subject": "Am I on target?",
+      "sample_questions": [
+        "Am I going to make my number this month?",
+        "What's my margin and brand share?",
+        "How much do I still need this quarter?",
+        "Am I ahead or behind for this point in the month?",
+        "How does this compare with the same month last year?",
+        "How did I do against target last month?"
+      ],
+      "answer_example": "As of October seventh you're 39% ahead of pace: $339,406 against the $243,871 you'd need by now, on a $1,080,000 month. At this rate you land near $1.5 million. Margin is 6.7%, under the 13% line."
     },
     {
       "name": "lookup_biggest_orders",
@@ -467,25 +523,10 @@
     "_comment": "Questions from the 9/8/2026 PDF that no built table answers. Shown in the web guide so a rep knows not to ask, rather than finding out mid-call. Each waits on a NAV table not yet exported to Databricks.",
     "waiting_on": [
       {
-        "table": "Salesperson Target",
-        "unlocks": [
-          "Will I hit my target this month?",
-          "How much more do I need for the rest of the month?",
-          "Am I ahead or behind for this point in the month?",
-          "How does this compare with the same month last year?"
-        ]
-      },
-      {
         "table": "Customer Outstanding Balance",
         "unlocks": [
           "Which accounts are past their terms?",
           "What are my average AR days?"
-        ]
-      },
-      {
-        "table": "Sales Person Margin History",
-        "unlocks": [
-          "What share of my sales is branded?"
         ]
       },
       {

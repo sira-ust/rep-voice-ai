@@ -487,9 +487,36 @@ def run_tool_call(name: str, value: str, rep: str = "") -> str:
                                     "outside what %s can see. Say so plainly and name "
                                     "the rep who owns it if one is given." % (rep or "you")),
                     })
-        return json.dumps({"columns": cols, "rows": rows})
+        return json.dumps({"row_count": len(rows), "rows": labelled_rows(cols, rows)})
     except common.Fail as exc:
         return json.dumps({"error": str(exc)})
+
+
+_DECIMAL = re.compile(r"-?\d+\.\d+")
+
+
+def labelled_rows(cols: list, rows: list) -> list:
+    """Rows as name-to-value records rather than bare arrays.
+
+    Databricks returns a list of column names and rows of values in the same
+    order, and handing the model that meant it found a number by counting
+    positions. With twenty-odd columns and a row per period it miscounted:
+    asked about one day, it gave that day's sales and the month's margin, two
+    positions apart in neighbouring rows. A label on every value removes the
+    counting.
+
+    Trailing zeros go too -- Databricks pads decimals to six places, and
+    "1503083.630000" was miscopied as 1,503,183.63.
+    """
+    out = []
+    for row in rows:
+        record = {}
+        for name, value in zip(cols, row):
+            if isinstance(value, str) and _DECIMAL.fullmatch(value):
+                value = value.rstrip("0").rstrip(".")
+            record[name] = value
+        out.append(record)
+    return out
 
 
 def call_upstream_llm(messages: list, model: str, max_tokens: int, tools: list) -> dict:
