@@ -453,9 +453,13 @@ async function startConversation() {
           state.counts.transcripts += 1;
           // Already shown from the live stream: ElevenLabs' copy is the
           // authoritative wording, so take it, but in the same bubble.
+          // The bubble stays this turn's until the reply is confirmed below:
+          // ElevenLabs sometimes asks again just after confirming the words --
+          // the rep kept talking, or the mic caught something while the agent
+          // spoke -- and closing the turn here sent that re-transcription to a
+          // new bubble, so the question showed twice with the answer after it.
           if (state.live.node && state.live.node.isConnected) {
             state.live.node.textContent = message;
-            state.live.node = null;
           } else {
             addMessage(message, "user");
           }
@@ -464,6 +468,9 @@ async function startConversation() {
           // Replace the streamed preview rather than adding a second bubble.
           // The live bubble is kept as it is: ElevenLabs' copy is the same
           // words with the formatting stripped for the voice.
+          // The reply is confirmed, so the turn is over: the next words from
+          // the rep start a new bubble.
+          state.live.node = null;
           if (state.live.reply && state.live.reply.isConnected) {
             state.live.reply = null;
           } else if (state.streaming.node) {
