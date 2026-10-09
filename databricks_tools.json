@@ -99,38 +99,6 @@
   },
   "tools": [
     {
-      "name": "lookup_rep_month",
-      "table": "ust_databricks.ust_reporting.mart_rep_period_status",
-      "lookup_column": "rep_name",
-      "match": "contains",
-      "columns": [
-        "orders_submitted",
-        "order_value_total",
-        "order_value_avg",
-        "accounts_ordered",
-        "order_value_largest",
-        "order_value_projected",
-        "prev_order_value_total",
-        "order_value_change_pct",
-        "as_of_date"
-      ],
-      "filters": [
-        "period_type = 'month'",
-        "is_current"
-      ],
-      "limit": 1,
-      "value_label": "rep being asked about",
-      "example": "Ken Tov",
-      "description": "How ONE REP is doing this month, by their name. Use for a rep asking about their own performance -- orders submitted, total and average order value, their biggest order, how many accounts ordered, where they are on pace to land by month end, and how that compares with last month. This is the rep's own numbers, not one account's: for a single store use lookup_account_status.",
-      "subject": "How am I doing?",
-      "sample_questions": [
-        "How am I doing this month?",
-        "How does that compare to last month?",
-        "Where will I land by month end?"
-      ],
-      "answer_example": "A hundred and fifty-six orders so far this month, about two million dollars, across seventy-seven accounts. At this pace you land near two point seven."
-    },
-    {
       "name": "lookup_rep_sales",
       "table": "ust_databricks.ust_reporting.mart_rep_period_sales",
       "lookup_column": "rep_name",
@@ -168,9 +136,10 @@
       "limit": 7,
       "value_label": "rep being asked about",
       "example": "Ken Tov",
-      "description": "ONE REP's POSTED sales against their TARGET, by their name -- every channel (PDA, app, web, phone, email), from January 2025. Answers 'am I going to make my number', how much they still need, selling days left, where they will land, MARGIN and OWN-BRAND share, and the change on last year. One row each for the current day, week, month, quarter and year, plus last month (is_current false); pick the row by period_type. Percentages are fractions: multiply by 100. pct_of_target_to_date is the verdict -- 1.0 is exactly on pace, 1.39 is 39% ahead, 0.85 is 15% behind. For 'will I make it' use sales_projected and pct_of_target_projected. Use brand_pct_of_sales; brand_pct_of_product_sales is NAV's own figure on a different denominator, only for why the two differ. Say as_of_date: these post days after an order is keyed. For orders submitted in the app this month use lookup_rep_month instead -- never quote one as the other.",
-      "subject": "Am I on target?",
+      "description": "ONE REP's POSTED sales against their TARGET, by their name -- every channel (PDA, app, web, phone, email), from January 2025. THE DEFAULT for 'how am I doing', 'my progress', 'how is my month going' -- answer those with pace against target. Also answers 'am I going to make my number', how much they still need, selling days left, where they will land, MARGIN and OWN-BRAND share, and the change on last year. One row each for the current day, week, month, quarter and year, plus last month (is_current false); pick the row by period_type. Percentages are fractions: multiply by 100. pct_of_target_to_date is the verdict -- 1.0 is exactly on pace, 1.39 is 39% ahead, 0.85 is 15% behind. For 'will I make it' use sales_projected and pct_of_target_projected. Use brand_pct_of_sales; brand_pct_of_product_sales is NAV's own figure on a different denominator, only for why the two differ. Say as_of_date: these post days after an order is keyed. For orders submitted in the app this month use lookup_rep_month instead -- never quote one as the other.",
+      "subject": "How am I doing?",
       "sample_questions": [
+        "How am I doing this month?",
         "Am I going to make my number this month?",
         "What's my margin and brand share?",
         "How much do I still need this quarter?",
@@ -179,6 +148,38 @@
         "How did I do against target last month?"
       ],
       "answer_example": "As of October seventh you're 39% ahead of pace: $339,406 against the $243,871 you'd need by now, on a $1,080,000 month. At this rate you land near $1.5 million. Margin is 6.7%, under the 13% line."
+    },
+    {
+      "name": "lookup_rep_month",
+      "table": "ust_databricks.ust_reporting.mart_rep_period_status",
+      "lookup_column": "rep_name",
+      "match": "contains",
+      "columns": [
+        "orders_submitted",
+        "order_value_total",
+        "order_value_avg",
+        "accounts_ordered",
+        "order_value_largest",
+        "order_value_projected",
+        "prev_order_value_total",
+        "order_value_change_pct",
+        "as_of_date"
+      ],
+      "filters": [
+        "period_type = 'month'",
+        "is_current"
+      ],
+      "limit": 1,
+      "value_label": "rep being asked about",
+      "example": "Ken Tov",
+      "description": "ONE REP's ORDERS SUBMITTED in the app this month, by their name: how many orders, total and average order value, their biggest order, how many accounts ordered, where submitted orders are on pace to land, and the same for last month. Use ONLY when they ask about orders -- how many orders, order value, what they submitted. For how they are doing, their progress, their month or their goal, use lookup_rep_sales: that is sales against target. Never quote these order totals as their sales against target. For a single store use lookup_account_status.",
+      "subject": "My orders",
+      "sample_questions": [
+        "How many orders have I submitted this month?",
+        "What's my total order value so far?",
+        "How do my orders compare to last month?"
+      ],
+      "answer_example": "Twenty-nine orders submitted so far this month, about $300,000 across twenty accounts. At this pace your orders land near $1.3 million."
     },
     {
       "name": "lookup_biggest_orders",
@@ -201,8 +202,8 @@
       "limit": 5,
       "value_label": "rep whose orders to list",
       "example": "Ryan Tran",
-      "description": "ONE REP's biggest orders this month, largest first, each WITH THE CUSTOMER that placed it, how many items were on it, which channel it came through and the date. Use when a rep asks about their biggest or largest order, who it was from, or how their orders split across channels. Requires the rep's name. For their month as a whole -- totals, averages, pace -- use lookup_rep_month.",
-      "subject": "How am I doing?",
+      "description": "ONE REP's biggest orders this month, largest first, each WITH THE CUSTOMER that placed it, how many items were on it, which channel it came through and the date. Use when a rep asks about their biggest or largest order, who it was from, or how their orders split across channels. Requires the rep's name. For their order totals use lookup_rep_month; for how their month is going against target use lookup_rep_sales.",
+      "subject": "My orders",
       "sample_questions": [
         "What is my largest order and which customer?",
         "Which of my orders came through the app?"
@@ -231,7 +232,7 @@
       "value_label": "rep whose mix to break down",
       "example": "Ryan Tran",
       "description": "What ONE REP's month was MADE OF: how many invoice lines and distinct items and categories, and the share of LINES that were promotional or new items, plus the rate at which lines came back. Shares here are by line, not by value -- too little of the invoice history carries a price for a value share to mean anything, so if someone asks for the split by value, say it is by line and that value coverage is too thin to divide up. These are invoiced lines, not orders submitted: for order counts, totals and pace use lookup_rep_month, and for individual orders use lookup_biggest_orders.",
-      "subject": "How am I doing?",
+      "subject": "My orders",
       "sample_questions": [
         "What was my month made of?",
         "How much of my month was promo or new items?"
