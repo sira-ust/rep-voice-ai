@@ -486,37 +486,154 @@
     {
       "name": "lookup_accounts_to_call",
       "table": "ust_databricks.ust_reporting.mart_rep_account_status",
-      "lookup_column": "rep_name",
+      "lookup_column": "a.rep_name",
       "match": "contains",
       "columns": [
-        "owner_rep_name",
-        "customer_name",
-        "city",
-        "customer_key",
-        "days_since_last_order",
-        "order_value_recent",
-        "attention_reason",
-        "delivery_days"
+        "a.customer_name",
+        "a.city",
+        "a.customer_key",
+        "a.delivery_days",
+        "a.appointment_required",
+        "coalesce(i.inv_days_12m, 0) AS invoice_days_12m",
+        "round((CASE WHEN i.inv_days_12m >= 3 THEN datediff(i.inv_last, i.inv_first_12m) / (i.inv_days_12m - 1) END)) AS usual_gap_days",
+        "datediff(i.inv_edge, i.inv_last) AS days_since_last_invoice",
+        "round((datediff(i.inv_edge, i.inv_last) / (CASE WHEN i.inv_days_12m >= 3 THEN datediff(i.inv_last, i.inv_first_12m) / (i.inv_days_12m - 1) END)), 1) AS days_past_usual"
       ],
       "filters": [
-        "needs_attention",
-        "customer_is_active",
-        "days_since_last_order IS NOT NULL",
-        "days_since_last_order <= 365",
-        "customer_name IS NOT NULL",
-        "is_owned_by_rep"
+        "a.customer_is_active",
+        "a.customer_name IS NOT NULL",
+        "a.is_owned_by_rep",
+        "i.inv_days_12m >= 6",
+        "datediff(i.inv_edge, i.inv_last) <= 180",
+        "(datediff(i.inv_edge, i.inv_last) / (CASE WHEN i.inv_days_12m >= 3 THEN datediff(i.inv_last, i.inv_first_12m) / (i.inv_days_12m - 1) END)) >= 1.0"
       ],
-      "order_by": "attention_priority, days_since_last_order DESC",
+      "order_by": "(datediff(i.inv_edge, i.inv_last) / (CASE WHEN i.inv_days_12m >= 3 THEN datediff(i.inv_last, i.inv_first_12m) / (i.inv_days_12m - 1) END)) DESC",
       "limit": 6,
       "value_label": "rep whose accounts to list",
       "example": "Ryan Tran",
-      "description": "Which of ONE REP's OWN accounts need a call, most urgent first. Requires the rep's name: these are their accounts, nobody else's, so never call this without knowing who you are speaking to -- ask first. Use when a rep asks who to call or visit, who has gone quiet, or which of their accounts need attention. Covers accounts seen within the last year. For one named store use lookup_account_status; for accounts near where they are standing use lookup_nearby_accounts.",
+      "description": "Which of ONE REP's OWN accounts most need a call: regular buyers (invoiced on 6+ days in the last 12 months) that have gone past their usual gap between orders, worst first. Each row has in_words -- answer from it: how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days. Counts every channel and every rep's invoices for the store, not just the app. Stores quiet for 180+ days are left out on purpose: those are lookup_winback_accounts. For a place the rep is going use lookup_accounts_in_city or lookup_accounts_on_route; for one named store use lookup_account_status. INTERIM: the rhythm is worked out here from invoices; it will be replaced by columns built in dbt.",
       "subject": "Who should I call?",
       "sample_questions": [
-        "Which customers should I visit first today?",
-        "Which of my accounts have gone quiet?"
+        "Which customers should I call this week?",
+        "Who's stopped ordering from me?",
+        "Which of my regulars have gone quiet?"
       ],
-      "answer_example": "Six of yours need a call. Tan Viet Oriental Food in Salina is the longest, three hundred and forty-three days, then Asian Market Grocery in Milwaukee."
+      "answer_example": "Hmong Legacy in Madison is the one to call: it usually buys about every 32 days and it's been 61. Mei Hua and Khun Asian are also past their usual gap.",
+      "from": "ust_databricks.ust_reporting.mart_rep_account_status a LEFT JOIN (SELECT f.customer_key, count(DISTINCT CASE WHEN f.posting_date > date_sub(e.edge, 365) THEN f.posting_date END) AS inv_days_12m, min(CASE WHEN f.posting_date > date_sub(e.edge, 365) THEN f.posting_date END) AS inv_first_12m, max(f.posting_date) AS inv_last, count(DISTINCT f.posting_date) AS inv_days_all, max(e.edge) AS inv_edge FROM ust_databricks.ust_facts.fct_invoices f CROSS JOIN (SELECT max(posting_date) AS edge FROM ust_databricks.ust_facts.fct_invoices) e GROUP BY f.customer_key) i ON i.customer_key = a.customer_key"
+    },
+    {
+      "name": "lookup_winback_accounts",
+      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
+      "from": "ust_databricks.ust_reporting.mart_rep_account_status a LEFT JOIN (SELECT f.customer_key, count(DISTINCT CASE WHEN f.posting_date > date_sub(e.edge, 365) THEN f.posting_date END) AS inv_days_12m, min(CASE WHEN f.posting_date > date_sub(e.edge, 365) THEN f.posting_date END) AS inv_first_12m, max(f.posting_date) AS inv_last, count(DISTINCT f.posting_date) AS inv_days_all, max(e.edge) AS inv_edge FROM ust_databricks.ust_facts.fct_invoices f CROSS JOIN (SELECT max(posting_date) AS edge FROM ust_databricks.ust_facts.fct_invoices) e GROUP BY f.customer_key) i ON i.customer_key = a.customer_key",
+      "lookup_column": "a.rep_name",
+      "match": "contains",
+      "columns": [
+        "a.customer_name",
+        "a.city",
+        "a.customer_key",
+        "a.delivery_days",
+        "a.appointment_required",
+        "coalesce(i.inv_days_12m, 0) AS invoice_days_12m",
+        "round((CASE WHEN i.inv_days_12m >= 3 THEN datediff(i.inv_last, i.inv_first_12m) / (i.inv_days_12m - 1) END)) AS usual_gap_days",
+        "datediff(i.inv_edge, i.inv_last) AS days_since_last_invoice",
+        "round((datediff(i.inv_edge, i.inv_last) / (CASE WHEN i.inv_days_12m >= 3 THEN datediff(i.inv_last, i.inv_first_12m) / (i.inv_days_12m - 1) END)), 1) AS days_past_usual",
+        "i.inv_days_all AS invoice_days_all_time"
+      ],
+      "filters": [
+        "a.customer_is_active",
+        "a.customer_name IS NOT NULL",
+        "a.is_owned_by_rep",
+        "i.inv_days_all >= 6",
+        "(datediff(i.inv_edge, i.inv_last) > 180 OR (datediff(i.inv_edge, i.inv_last) / (CASE WHEN i.inv_days_12m >= 3 THEN datediff(i.inv_last, i.inv_first_12m) / (i.inv_days_12m - 1) END)) > 6)"
+      ],
+      "order_by": "i.inv_days_all DESC",
+      "limit": 6,
+      "value_label": "rep whose accounts to list",
+      "example": "Ryan Tran",
+      "description": "ONE REP's former regulars that have gone quiet for a long time -- invoiced on 6+ days in all, but nothing for 180+ days or six times their usual gap -- biggest former buyers first. Win-back candidates, not this week's calls: use ONLY when the rep asks about old, lost or long-quiet accounts. Each row has in_words -- answer from it: how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days. INTERIM: the rhythm is worked out here from invoices; it will be replaced by columns built in dbt.",
+      "subject": "Who should I call?",
+      "sample_questions": [
+        "Which old customers could I win back?",
+        "Who stopped buying from me a long time ago?"
+      ],
+      "answer_example": "Your biggest long-quiet account is Asian Supermarket in Kansas City: it bought on 40 days, nothing since March."
+    },
+    {
+      "name": "lookup_accounts_in_city",
+      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
+      "from": "ust_databricks.ust_reporting.mart_rep_account_status a LEFT JOIN (SELECT f.customer_key, count(DISTINCT CASE WHEN f.posting_date > date_sub(e.edge, 365) THEN f.posting_date END) AS inv_days_12m, min(CASE WHEN f.posting_date > date_sub(e.edge, 365) THEN f.posting_date END) AS inv_first_12m, max(f.posting_date) AS inv_last, count(DISTINCT f.posting_date) AS inv_days_all, max(e.edge) AS inv_edge FROM ust_databricks.ust_facts.fct_invoices f CROSS JOIN (SELECT max(posting_date) AS edge FROM ust_databricks.ust_facts.fct_invoices) e GROUP BY f.customer_key) i ON i.customer_key = a.customer_key",
+      "lookup_column": "a.city",
+      "match": "contains",
+      "columns": [
+        "a.customer_name",
+        "a.city",
+        "a.customer_key",
+        "a.delivery_days",
+        "a.appointment_required",
+        "coalesce(i.inv_days_12m, 0) AS invoice_days_12m",
+        "round((CASE WHEN i.inv_days_12m >= 3 THEN datediff(i.inv_last, i.inv_first_12m) / (i.inv_days_12m - 1) END)) AS usual_gap_days",
+        "datediff(i.inv_edge, i.inv_last) AS days_since_last_invoice",
+        "round((datediff(i.inv_edge, i.inv_last) / (CASE WHEN i.inv_days_12m >= 3 THEN datediff(i.inv_last, i.inv_first_12m) / (i.inv_days_12m - 1) END)), 1) AS days_past_usual"
+      ],
+      "filters": [
+        "a.customer_is_active",
+        "a.customer_name IS NOT NULL",
+        "a.is_owned_by_rep"
+      ],
+      "order_by": "(datediff(i.inv_edge, i.inv_last) / (CASE WHEN i.inv_days_12m >= 3 THEN datediff(i.inv_last, i.inv_first_12m) / (i.inv_days_12m - 1) END)) DESC NULLS LAST, i.inv_days_12m DESC NULLS LAST",
+      "limit": 8,
+      "value_label": "city the rep is going to",
+      "example": "Indianapolis",
+      "description": "The rep's OWN accounts in ONE CITY they are going to, the ones most past their usual buying gap first, with delivery days and whether an appointment is needed. Use when a rep says where they will be: 'I'm in Indianapolis Thursday'. Send just the city name. If they name a day, favour accounts whose delivery_days include it. Each row has in_words -- answer from it: how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days. INTERIM: the rhythm is worked out here from invoices; it will be replaced by columns built in dbt.",
+      "subject": "Who should I call?",
+      "sample_questions": [
+        "I'm in Indianapolis on Thursday, who should I see?",
+        "Who are my customers in Milwaukee?"
+      ],
+      "answer_example": "In Indianapolis, Pyone Cho is past its usual gap and takes Thursday deliveries.",
+      "rep_column": "a.rep_name"
+    },
+    {
+      "name": "lookup_accounts_on_route",
+      "kind": "sql",
+      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
+      "sql": [
+        "SELECT customer_name, city, customer_key, delivery_days, appointment_required, invoice_days_12m,",
+        "usual_gap_days, days_since_last_invoice, days_past_usual,",
+        "round(t * route_miles) AS miles_from_start,",
+        "round(sqrt(pow(px - (ax + t * dx), 2) + pow(py - (ay + t * dy), 2)), 1) AS miles_off_route,",
+        "round(route_miles) AS route_miles",
+        "FROM (",
+        "SELECT g.*, sqrt(dx * dx + dy * dy) AS route_miles,",
+        "greatest(0, least(1, ((px - ax) * dx + (py - ay) * dy) / nullif(dx * dx + dy * dy, 0))) AS t",
+        "FROM (",
+        "SELECT a.customer_name, a.city, a.customer_key, a.delivery_days, a.appointment_required, coalesce(i.inv_days_12m, 0) AS invoice_days_12m, round((CASE WHEN i.inv_days_12m >= 3 THEN datediff(i.inv_last, i.inv_first_12m) / (i.inv_days_12m - 1) END)) AS usual_gap_days, datediff(i.inv_edge, i.inv_last) AS days_since_last_invoice, round((datediff(i.inv_edge, i.inv_last) / (CASE WHEN i.inv_days_12m >= 3 THEN datediff(i.inv_last, i.inv_first_12m) / (i.inv_days_12m - 1) END)), 1) AS days_past_usual,",
+        "o.lon * 69.17 * cos(radians((o.lat + d.lat) / 2)) AS ax, o.lat * 69.0 AS ay,",
+        "(d.lon - o.lon) * 69.17 * cos(radians((o.lat + d.lat) / 2)) AS dx, (d.lat - o.lat) * 69.0 AS dy,",
+        "c.longitude * 69.17 * cos(radians((o.lat + d.lat) / 2)) AS px, c.latitude * 69.0 AS py",
+        "FROM ust_databricks.ust_reporting.mart_rep_account_status a LEFT JOIN (SELECT f.customer_key, count(DISTINCT CASE WHEN f.posting_date > date_sub(e.edge, 365) THEN f.posting_date END) AS inv_days_12m, min(CASE WHEN f.posting_date > date_sub(e.edge, 365) THEN f.posting_date END) AS inv_first_12m, max(f.posting_date) AS inv_last, count(DISTINCT f.posting_date) AS inv_days_all, max(e.edge) AS inv_edge FROM ust_databricks.ust_facts.fct_invoices f CROSS JOIN (SELECT max(posting_date) AS edge FROM ust_databricks.ust_facts.fct_invoices) e GROUP BY f.customer_key) i ON i.customer_key = a.customer_key",
+        "JOIN ust_databricks.ust_dims.dim_customers c ON c.customer_key = a.customer_key AND c.has_coordinates",
+        "CROSS JOIN (SELECT avg(latitude) AS lat, avg(longitude) AS lon FROM ust_databricks.ust_dims.dim_customers WHERE is_active AND has_coordinates AND lower(trim(city)) = lower(trim(regexp_replace(element_at(split(trim(:lookup_value), '(?i)\\\\s+to\\\\s+'), 1), ',.*$', '')))) o",
+        "CROSS JOIN (SELECT avg(latitude) AS lat, avg(longitude) AS lon FROM ust_databricks.ust_dims.dim_customers WHERE is_active AND has_coordinates AND lower(trim(city)) = lower(trim(regexp_replace(element_at(split(trim(:lookup_value), '(?i)\\\\s+to\\\\s+'), -1), ',.*$', '')))) d",
+        "WHERE a.customer_is_active AND a.customer_name IS NOT NULL AND a.is_owned_by_rep {rep_filter}",
+        ") g",
+        ") r",
+        "WHERE sqrt(pow(px - (ax + t * dx), 2) + pow(py - (ay + t * dy), 2)) <= 15",
+        "AND t * route_miles >= 15",
+        "ORDER BY CASE WHEN days_past_usual >= 1.5 THEN 0 WHEN days_past_usual >= 1 THEN 1",
+        "WHEN invoice_days_12m >= 6 THEN 2 ELSE 3 END, t",
+        "LIMIT 8"
+      ],
+      "rep_column": "a.rep_name",
+      "value_label": "trip, as 'FROM CITY to TO CITY'",
+      "example": "Milwaukee to Indianapolis",
+      "description": "The rep's OWN accounts ALONG A DRIVE between two cities: within 15 miles of the straight line from one to the other, from 15 miles out of the starting city to the destination, the ones past their usual buying gap first. Send the value as 'Milwaukee to Indianapolis'. If the rep names only where they are going, ask where they are driving from -- or use lookup_accounts_in_city if they only want that city. Distances are as the crow flies, not by road: say 'about N miles off the way'. Each row: miles_from_start (driving order), miles_off_route, route_miles. Each row has in_words -- answer from it: how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days. No rows usually means a city name was not recognised: ask them to repeat it. INTERIM: the rhythm is worked out here from invoices; it will be replaced by columns built in dbt.",
+      "subject": "Who should I call?",
+      "sample_questions": [
+        "I'm driving from Milwaukee to Indianapolis, who can I stop at?",
+        "Who's on the way from Chicago to Green Bay?"
+      ],
+      "answer_example": "On the way, a store in Kenosha is about 4 miles off the route and past its usual gap. In Indianapolis, Pyone Cho is due."
     }
   ],
   "tbd": {

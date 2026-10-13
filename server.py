@@ -624,9 +624,56 @@ def add_vs_last_month(records: list) -> None:
         pass
 
 
+def read_account_rhythm(r: dict) -> str:
+    """One account from the call-planning lookups, as the sentence to say.
+
+    The point of these lookups is the account's own rhythm -- "usually every 30
+    days, it's been 54" -- and that is a ratio the model would otherwise have to
+    rebuild from three columns, the kind of arithmetic it has been getting wrong.
+    """
+    name = re.sub(r"\bLlc\b", "LLC", (r.get("customer_name") or "").title())
+    city = (r.get("city") or "").title()
+    head = "%s in %s" % (name, city) if city else name
+    days12 = int(_num(r.get("invoice_days_12m")) or 0)
+    gap, since, past = _num(r.get("usual_gap_days")), _num(r.get("days_since_last_invoice")), _num(r.get("days_past_usual"))
+    all_time = _num(r.get("invoice_days_all_time"))
+    if all_time and since is not None and (since > 180 or (past or 0) > 6):
+        # The win-back list: a store that bought often and stopped. "Buys
+        # occasionally" would describe its last year, not what it was.
+        body = "a former regular -- bought on %d days in all; last invoice %d days ago" % (all_time, since)
+        all_time = None
+    elif gap is not None and since is not None:
+        body = "usually buys about every %d days; last invoice %d days ago" % (gap, since)
+        if past is not None:
+            body += (", %.1f times its usual gap" % past) if past >= 1 else ", still within its usual gap"
+    elif since is not None:
+        body = ("buys only occasionally (%d invoice day%s in the last year); last invoice %d days ago"
+                % (days12, "" if days12 == 1 else "s", since))
+    else:
+        body = "no invoices on record"
+    if all_time:
+        body += "; bought on %d days in all" % all_time
+    extras = []
+    if r.get("delivery_days"):
+        extras.append("takes deliveries %s" % r["delivery_days"])
+    if str(r.get("appointment_required")).lower() == "true":
+        extras.append("needs an appointment")
+    off, start = _num(r.get("miles_off_route")), _num(r.get("miles_from_start"))
+    if off is not None and start is not None:
+        extras.append("about %d miles off the way, %d miles into the drive (as the crow flies)"
+                      % (round(off), start))
+    return "%s: %s%s." % (head, body, ("; " + "; ".join(extras)) if extras else "")
+
+
 # Lookups whose rows get a plain-language reading added before the model sees
 # them -- where the raw columns proved easy to misread.
-ROW_READERS = {"lookup_rep_sales": read_rep_sales}
+ROW_READERS = {
+    "lookup_rep_sales": read_rep_sales,
+    "lookup_accounts_to_call": read_account_rhythm,
+    "lookup_winback_accounts": read_account_rhythm,
+    "lookup_accounts_in_city": read_account_rhythm,
+    "lookup_accounts_on_route": read_account_rhythm,
+}
 
 
 _DECIMAL = re.compile(r"-?\d+\.\d+")
