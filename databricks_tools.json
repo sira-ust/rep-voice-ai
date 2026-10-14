@@ -43,10 +43,10 @@
       "not_covered": "Store names repeat -- many accounts share one, and some names cover twenty-odd different stores. A name alone never identifies an account; the city and the owning rep are what separate them."
     },
     "ust_databricks.ust_reporting.mart_rep_account_status": {
-      "label": "Account activity and who to call",
-      "about": "One row per rep-and-account: when they last ordered, how long it has been, orders and order value recently and all time, their delivery days, and whether the account is flagged for attention and why.",
+      "label": "Accounts, who to call, and trips",
+      "about": "One row per rep and account: how often each store usually buys and how far past that it is, from invoices on every channel and by any rep; whether it is lapsing, due, on rhythm or a former regular; its city, delivery days and whether it needs an appointment; and when it last ordered.",
       "grain": "current, stamped with the day it was built",
-      "not_covered": "Built from orders submitted through the app, so an account that orders by phone or email can look quiet when it is not. It also holds no invoices, returns, balances or credit terms, and nothing about which items an account buys."
+      "not_covered": "No rep visits yet -- it cannot say when a rep was last at a store. Trips are planned on store locations as the crow flies, with no road directions or drive times. A store with fewer than three invoice days in the last year has no usual gap to measure."
     },
     "ust_databricks.ust_reporting.mart_rep_period_status": {
       "label": "How a rep is doing",
@@ -179,6 +179,154 @@
         "How did I do against target last month?"
       ],
       "answer_example": "As of October seventh you're 39% ahead of pace: $339,406 against the $243,871 you'd need by now, on a $1,080,000 month. At this rate you land near $1.5 million. Margin is 6.7%, under the 13% line."
+    },
+    {
+      "name": "lookup_accounts_to_call",
+      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
+      "lookup_column": "a.rep_name",
+      "match": "contains",
+      "columns": [
+        "a.customer_name",
+        "a.city",
+        "a.customer_key",
+        "a.delivery_days",
+        "a.appointment_required",
+        "a.invoice_days_12m",
+        "a.invoice_days_all_time",
+        "a.usual_gap_days",
+        "a.days_since_last_invoice_any_rep AS days_since_last_invoice",
+        "a.days_past_usual",
+        "a.rhythm_status"
+      ],
+      "filters": [
+        "a.customer_is_active",
+        "a.customer_name IS NOT NULL",
+        "a.is_owned_by_rep",
+        "a.rhythm_status IN ('lapsing', 'due')"
+      ],
+      "order_by": "a.rhythm_priority, a.days_past_usual DESC",
+      "limit": 6,
+      "value_label": "rep whose accounts to list",
+      "example": "Ryan Tran",
+      "description": "Which of ONE REP's OWN accounts most need a call -- the DEFAULT for who to call or visit, which regulars have gone quiet, who has stopped ordering or is overdue: regular buyers that have gone past their usual gap between orders -- 'lapsing' (1.5x or more) first, then 'due'. Each row has in_words -- answer from it: how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days. Rhythm is per store across every rep's invoices: usual_gap_days is the median gap between invoice days over the last year, days_past_usual how many of those gaps it has now been. Stores gone for months are left out on purpose: those are lookup_winback_accounts. For a place the rep is going use lookup_accounts_in_city or lookup_accounts_on_route; for one named store use lookup_account_status.",
+      "subject": "Who should I call?",
+      "sample_questions": [
+        "Which customers should I call this week?"
+      ],
+      "answer_example": "Hmong Legacy in Madison is the one to call: it usually buys about every 32 days and it's been 61. Mei Hua and Khun Asian are also past their usual gap.",
+      "from": "ust_databricks.ust_reporting.mart_rep_account_status a"
+    },
+    {
+      "name": "lookup_winback_accounts",
+      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
+      "from": "ust_databricks.ust_reporting.mart_rep_account_status a",
+      "lookup_column": "a.rep_name",
+      "match": "contains",
+      "columns": [
+        "a.customer_name",
+        "a.city",
+        "a.customer_key",
+        "a.delivery_days",
+        "a.appointment_required",
+        "a.invoice_days_12m",
+        "a.invoice_days_all_time",
+        "a.usual_gap_days",
+        "a.days_since_last_invoice_any_rep AS days_since_last_invoice",
+        "a.days_past_usual",
+        "a.rhythm_status"
+      ],
+      "filters": [
+        "a.customer_is_active",
+        "a.customer_name IS NOT NULL",
+        "a.is_owned_by_rep",
+        "a.rhythm_status IN ('former regular', 'dormant')"
+      ],
+      "order_by": "a.invoice_days_all_time DESC",
+      "limit": 6,
+      "value_label": "rep whose accounts to list",
+      "example": "Ryan Tran",
+      "description": "ONE REP's former regulars that have gone quiet for a long time, biggest former buyers first. Win-back candidates, not this week's calls: use ONLY when the rep asks about OLD or LOST customers, or ones gone for many months -- 'win back', 'stopped a long time ago', 'used to buy'. A regular that has 'gone quiet' or 'stopped ordering' without 'a long time' is lookup_accounts_to_call. Each row has in_words -- answer from it: how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days.",
+      "subject": "Who should I call?",
+      "sample_questions": [
+        "Which old customers could I win back?"
+      ],
+      "answer_example": "Your biggest long-quiet account is Asian Supermarket in Kansas City: it bought on 40 days, nothing since March."
+    },
+    {
+      "name": "lookup_accounts_in_city",
+      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
+      "from": "ust_databricks.ust_reporting.mart_rep_account_status a",
+      "lookup_column": "a.city",
+      "match": "contains",
+      "columns": [
+        "a.customer_name",
+        "a.city",
+        "a.customer_key",
+        "a.delivery_days",
+        "a.appointment_required",
+        "a.invoice_days_12m",
+        "a.invoice_days_all_time",
+        "a.usual_gap_days",
+        "a.days_since_last_invoice_any_rep AS days_since_last_invoice",
+        "a.days_past_usual",
+        "a.rhythm_status"
+      ],
+      "filters": [
+        "a.customer_is_active",
+        "a.customer_name IS NOT NULL",
+        "a.is_owned_by_rep"
+      ],
+      "order_by": "a.rhythm_priority, a.days_past_usual DESC NULLS LAST, a.invoice_days_12m DESC",
+      "limit": 8,
+      "value_label": "city the rep is going to",
+      "example": "Indianapolis",
+      "description": "The rep's OWN accounts in ONE CITY they are going to, the ones most past their usual buying gap first, with delivery days and whether an appointment is needed. Use when a rep says where they will be: 'I'm in Indianapolis Thursday'. Send just the city name. If they name a day, favour accounts whose delivery_days include it. Each row has in_words -- answer from it: how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days. Rhythm is per store across every rep's invoices: usual_gap_days is the median gap between invoice days over the last year, days_past_usual how many of those gaps it has now been.",
+      "subject": "Plan a trip",
+      "sample_questions": [
+        "I'm in Indianapolis on Thursday, who should I see?"
+      ],
+      "answer_example": "In Indianapolis, Pyone Cho is past its usual gap and takes Thursday deliveries.",
+      "rep_column": "a.rep_name"
+    },
+    {
+      "name": "lookup_accounts_on_route",
+      "kind": "sql",
+      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
+      "sql": [
+        "SELECT customer_name, city, customer_key, delivery_days, appointment_required, invoice_days_12m,",
+        "invoice_days_all_time, usual_gap_days, days_since_last_invoice, days_past_usual, rhythm_status,",
+        "round(t * route_miles) AS miles_from_start,",
+        "round(sqrt(pow(px - (ax + t * dx), 2) + pow(py - (ay + t * dy), 2)), 1) AS miles_off_route,",
+        "round(route_miles) AS route_miles",
+        "FROM (",
+        "SELECT g.*, sqrt(dx * dx + dy * dy) AS route_miles,",
+        "greatest(0, least(1, ((px - ax) * dx + (py - ay) * dy) / nullif(dx * dx + dy * dy, 0))) AS t",
+        "FROM (",
+        "SELECT a.customer_name, a.city, a.customer_key, a.delivery_days, a.appointment_required, a.invoice_days_12m, a.invoice_days_all_time, a.usual_gap_days, a.days_since_last_invoice_any_rep AS days_since_last_invoice, a.days_past_usual, a.rhythm_status, a.rhythm_priority,",
+        "o.lon * 69.17 * cos(radians((o.lat + d.lat) / 2)) AS ax, o.lat * 69.0 AS ay,",
+        "(d.lon - o.lon) * 69.17 * cos(radians((o.lat + d.lat) / 2)) AS dx, (d.lat - o.lat) * 69.0 AS dy,",
+        "c.longitude * 69.17 * cos(radians((o.lat + d.lat) / 2)) AS px, c.latitude * 69.0 AS py",
+        "FROM ust_databricks.ust_reporting.mart_rep_account_status a",
+        "JOIN ust_databricks.ust_dims.dim_customers c ON c.customer_key = a.customer_key AND c.has_coordinates",
+        "CROSS JOIN (SELECT avg(latitude) AS lat, avg(longitude) AS lon FROM ust_databricks.ust_dims.dim_customers WHERE is_active AND has_coordinates AND lower(trim(city)) = lower(trim(regexp_replace(element_at(split(trim(:lookup_value), '(?i)\\\\s+to\\\\s+'), 1), ',.*$', '')))) o",
+        "CROSS JOIN (SELECT avg(latitude) AS lat, avg(longitude) AS lon FROM ust_databricks.ust_dims.dim_customers WHERE is_active AND has_coordinates AND lower(trim(city)) = lower(trim(regexp_replace(element_at(split(trim(:lookup_value), '(?i)\\\\s+to\\\\s+'), -1), ',.*$', '')))) d",
+        "WHERE a.customer_is_active AND a.customer_name IS NOT NULL AND a.is_owned_by_rep {rep_filter}",
+        ") g",
+        ") r",
+        "WHERE sqrt(pow(px - (ax + t * dx), 2) + pow(py - (ay + t * dy), 2)) <= 15",
+        "AND t * route_miles >= 15",
+        "ORDER BY rhythm_priority, t",
+        "LIMIT 8"
+      ],
+      "rep_column": "a.rep_name",
+      "value_label": "trip, as 'FROM CITY to TO CITY'",
+      "example": "Milwaukee to Indianapolis",
+      "description": "The rep's OWN accounts ALONG A DRIVE between two cities: within 15 miles of the straight line from one to the other, from 15 miles out of the starting city to the destination, the ones past their usual buying gap first. Send the value as 'Milwaukee to Indianapolis'. If the rep names only where they are going, ask where they are driving from -- or use lookup_accounts_in_city if they only want that city. Distances are as the crow flies, not by road: say 'about N miles off the way'. Each row: miles_from_start (driving order), miles_off_route, route_miles. Each row has in_words -- answer from it: how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days. No rows usually means a city name was not recognised: ask them to repeat it.",
+      "subject": "Plan a trip",
+      "sample_questions": [
+        "I'm driving from Milwaukee to Indianapolis, who can I stop at?"
+      ],
+      "answer_example": "On the way, a store in Kenosha is about 4 miles off the route and past its usual gap. In Indianapolis, Pyone Cho is due."
     },
     {
       "name": "lookup_biggest_orders",
@@ -437,7 +585,7 @@
       "value_label": "store or account being asked about",
       "example": "asian market",
       "description": "Find a customer's account key from the name a caller said out loud. Use this FIRST whenever someone names a store rather than giving a key. Returns every active account matching those words with its city, post code and owning rep, because store names repeat -- many accounts share a name. Read the city and owner back and ask which one they mean before looking anything else up. Do not use this for products.",
-      "subject": "Who should I call?",
+      "subject": "Look up an account",
       "sample_questions": [
         "How is Asian Market doing?",
         "Look up Lee's Sandwiches"
@@ -470,7 +618,7 @@
       "value_label": "customer key",
       "example": "RED005",
       "description": "How ONE account is doing, by its customer key. Use for how an account is performing, when they last ordered, how long it has been, their recent order value, which days they accept deliveries and whether they need attention. If the caller gave a name instead of a key, run find_customer_by_name first. Do not use this for products or for a rep's own numbers.",
-      "subject": "Who should I call?",
+      "subject": "Look up an account",
       "sample_questions": [
         "How is RED005 doing?",
         "When did RED005 last order?",
@@ -482,159 +630,6 @@
         "customer_name IS NOT NULL",
         "is_owned_by_rep"
       ]
-    },
-    {
-      "name": "lookup_accounts_to_call",
-      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
-      "lookup_column": "a.rep_name",
-      "match": "contains",
-      "columns": [
-        "a.customer_name",
-        "a.city",
-        "a.customer_key",
-        "a.delivery_days",
-        "a.appointment_required",
-        "a.invoice_days_12m",
-        "a.invoice_days_all_time",
-        "a.usual_gap_days",
-        "a.days_since_last_invoice_any_rep AS days_since_last_invoice",
-        "a.days_past_usual",
-        "a.rhythm_status"
-      ],
-      "filters": [
-        "a.customer_is_active",
-        "a.customer_name IS NOT NULL",
-        "a.is_owned_by_rep",
-        "a.rhythm_status IN ('lapsing', 'due')"
-      ],
-      "order_by": "a.rhythm_priority, a.days_past_usual DESC",
-      "limit": 6,
-      "value_label": "rep whose accounts to list",
-      "example": "Ryan Tran",
-      "description": "Which of ONE REP's OWN accounts most need a call: regular buyers that have gone past their usual gap between orders -- 'lapsing' (1.5x or more) first, then 'due'. Each row has in_words -- answer from it: how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days. Rhythm is per store across every rep's invoices: usual_gap_days is the median gap between invoice days over the last year, days_past_usual how many of those gaps it has now been. Stores gone for months are left out on purpose: those are lookup_winback_accounts. For a place the rep is going use lookup_accounts_in_city or lookup_accounts_on_route; for one named store use lookup_account_status.",
-      "subject": "Who should I call?",
-      "sample_questions": [
-        "Which customers should I call this week?",
-        "Who's stopped ordering from me?",
-        "Which of my regulars have gone quiet?"
-      ],
-      "answer_example": "Hmong Legacy in Madison is the one to call: it usually buys about every 32 days and it's been 61. Mei Hua and Khun Asian are also past their usual gap.",
-      "from": "ust_databricks.ust_reporting.mart_rep_account_status a"
-    },
-    {
-      "name": "lookup_winback_accounts",
-      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
-      "from": "ust_databricks.ust_reporting.mart_rep_account_status a",
-      "lookup_column": "a.rep_name",
-      "match": "contains",
-      "columns": [
-        "a.customer_name",
-        "a.city",
-        "a.customer_key",
-        "a.delivery_days",
-        "a.appointment_required",
-        "a.invoice_days_12m",
-        "a.invoice_days_all_time",
-        "a.usual_gap_days",
-        "a.days_since_last_invoice_any_rep AS days_since_last_invoice",
-        "a.days_past_usual",
-        "a.rhythm_status"
-      ],
-      "filters": [
-        "a.customer_is_active",
-        "a.customer_name IS NOT NULL",
-        "a.is_owned_by_rep",
-        "a.rhythm_status IN ('former regular', 'dormant')"
-      ],
-      "order_by": "a.invoice_days_all_time DESC",
-      "limit": 6,
-      "value_label": "rep whose accounts to list",
-      "example": "Ryan Tran",
-      "description": "ONE REP's former regulars that have gone quiet for a long time, biggest former buyers first. Win-back candidates, not this week's calls: use ONLY when the rep asks about old, lost or long-quiet accounts. Each row has in_words -- answer from it: how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days.",
-      "subject": "Who should I call?",
-      "sample_questions": [
-        "Which old customers could I win back?",
-        "Who stopped buying from me a long time ago?"
-      ],
-      "answer_example": "Your biggest long-quiet account is Asian Supermarket in Kansas City: it bought on 40 days, nothing since March."
-    },
-    {
-      "name": "lookup_accounts_in_city",
-      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
-      "from": "ust_databricks.ust_reporting.mart_rep_account_status a",
-      "lookup_column": "a.city",
-      "match": "contains",
-      "columns": [
-        "a.customer_name",
-        "a.city",
-        "a.customer_key",
-        "a.delivery_days",
-        "a.appointment_required",
-        "a.invoice_days_12m",
-        "a.invoice_days_all_time",
-        "a.usual_gap_days",
-        "a.days_since_last_invoice_any_rep AS days_since_last_invoice",
-        "a.days_past_usual",
-        "a.rhythm_status"
-      ],
-      "filters": [
-        "a.customer_is_active",
-        "a.customer_name IS NOT NULL",
-        "a.is_owned_by_rep"
-      ],
-      "order_by": "a.rhythm_priority, a.days_past_usual DESC NULLS LAST, a.invoice_days_12m DESC",
-      "limit": 8,
-      "value_label": "city the rep is going to",
-      "example": "Indianapolis",
-      "description": "The rep's OWN accounts in ONE CITY they are going to, the ones most past their usual buying gap first, with delivery days and whether an appointment is needed. Use when a rep says where they will be: 'I'm in Indianapolis Thursday'. Send just the city name. If they name a day, favour accounts whose delivery_days include it. Each row has in_words -- answer from it: how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days. Rhythm is per store across every rep's invoices: usual_gap_days is the median gap between invoice days over the last year, days_past_usual how many of those gaps it has now been.",
-      "subject": "Who should I call?",
-      "sample_questions": [
-        "I'm in Indianapolis on Thursday, who should I see?",
-        "Who are my customers in Milwaukee?"
-      ],
-      "answer_example": "In Indianapolis, Pyone Cho is past its usual gap and takes Thursday deliveries.",
-      "rep_column": "a.rep_name"
-    },
-    {
-      "name": "lookup_accounts_on_route",
-      "kind": "sql",
-      "table": "ust_databricks.ust_reporting.mart_rep_account_status",
-      "sql": [
-        "SELECT customer_name, city, customer_key, delivery_days, appointment_required, invoice_days_12m,",
-        "invoice_days_all_time, usual_gap_days, days_since_last_invoice, days_past_usual, rhythm_status,",
-        "round(t * route_miles) AS miles_from_start,",
-        "round(sqrt(pow(px - (ax + t * dx), 2) + pow(py - (ay + t * dy), 2)), 1) AS miles_off_route,",
-        "round(route_miles) AS route_miles",
-        "FROM (",
-        "SELECT g.*, sqrt(dx * dx + dy * dy) AS route_miles,",
-        "greatest(0, least(1, ((px - ax) * dx + (py - ay) * dy) / nullif(dx * dx + dy * dy, 0))) AS t",
-        "FROM (",
-        "SELECT a.customer_name, a.city, a.customer_key, a.delivery_days, a.appointment_required, a.invoice_days_12m, a.invoice_days_all_time, a.usual_gap_days, a.days_since_last_invoice_any_rep AS days_since_last_invoice, a.days_past_usual, a.rhythm_status, a.rhythm_priority,",
-        "o.lon * 69.17 * cos(radians((o.lat + d.lat) / 2)) AS ax, o.lat * 69.0 AS ay,",
-        "(d.lon - o.lon) * 69.17 * cos(radians((o.lat + d.lat) / 2)) AS dx, (d.lat - o.lat) * 69.0 AS dy,",
-        "c.longitude * 69.17 * cos(radians((o.lat + d.lat) / 2)) AS px, c.latitude * 69.0 AS py",
-        "FROM ust_databricks.ust_reporting.mart_rep_account_status a",
-        "JOIN ust_databricks.ust_dims.dim_customers c ON c.customer_key = a.customer_key AND c.has_coordinates",
-        "CROSS JOIN (SELECT avg(latitude) AS lat, avg(longitude) AS lon FROM ust_databricks.ust_dims.dim_customers WHERE is_active AND has_coordinates AND lower(trim(city)) = lower(trim(regexp_replace(element_at(split(trim(:lookup_value), '(?i)\\\\s+to\\\\s+'), 1), ',.*$', '')))) o",
-        "CROSS JOIN (SELECT avg(latitude) AS lat, avg(longitude) AS lon FROM ust_databricks.ust_dims.dim_customers WHERE is_active AND has_coordinates AND lower(trim(city)) = lower(trim(regexp_replace(element_at(split(trim(:lookup_value), '(?i)\\\\s+to\\\\s+'), -1), ',.*$', '')))) d",
-        "WHERE a.customer_is_active AND a.customer_name IS NOT NULL AND a.is_owned_by_rep {rep_filter}",
-        ") g",
-        ") r",
-        "WHERE sqrt(pow(px - (ax + t * dx), 2) + pow(py - (ay + t * dy), 2)) <= 15",
-        "AND t * route_miles >= 15",
-        "ORDER BY rhythm_priority, t",
-        "LIMIT 8"
-      ],
-      "rep_column": "a.rep_name",
-      "value_label": "trip, as 'FROM CITY to TO CITY'",
-      "example": "Milwaukee to Indianapolis",
-      "description": "The rep's OWN accounts ALONG A DRIVE between two cities: within 15 miles of the straight line from one to the other, from 15 miles out of the starting city to the destination, the ones past their usual buying gap first. Send the value as 'Milwaukee to Indianapolis'. If the rep names only where they are going, ask where they are driving from -- or use lookup_accounts_in_city if they only want that city. Distances are as the crow flies, not by road: say 'about N miles off the way'. Each row: miles_from_start (driving order), miles_off_route, route_miles. Each row has in_words -- answer from it: how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days. No rows usually means a city name was not recognised: ask them to repeat it.",
-      "subject": "Who should I call?",
-      "sample_questions": [
-        "I'm driving from Milwaukee to Indianapolis, who can I stop at?",
-        "Who's on the way from Chicago to Green Bay?"
-      ],
-      "answer_example": "On the way, a store in Kenosha is about 4 miles off the route and past its usual gap. In Indianapolis, Pyone Cho is due."
     }
   ],
   "tbd": {
