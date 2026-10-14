@@ -127,6 +127,14 @@
     </main>
 
     <section class="transcript-section">
+      <!-- Pinned above the chat, so what to ask stays in view the whole call. -->
+      <div class="topic-bar" id="topicBar" hidden>
+        <div class="topic-bar-head">
+          <span class="guide-subject">Ask me about</span>
+          <div class="topic-bar-topics" id="topicBarTopics"></div>
+        </div>
+        <div class="topic-bar-panel" id="topicBarPanel" hidden></div>
+      </div>
       <div class="transcript" id="transcript">
         <div class="guide" id="guide">
           <div class="guide-groups" id="guideGroups"></div>

@@ -51,7 +51,7 @@ def wait_for(port: int, seconds: float = 25.0) -> bool:
     return False
 
 
-def call_scope(port: int, rep: str) -> str:
+def call_scope(port: int, rep: str) -> tuple[str, str]:
     """A scope token for one conversation, minted the way the page mints it.
 
     It has to come from the server rather than be signed here: the token
@@ -61,20 +61,62 @@ def call_scope(port: int, rep: str) -> str:
     the model -- it invented a quarter's "still needed", a margin and last
     month's result, none of them from the table -- which is not what a real
     call does, so the test was testing something else.
+
+    Returns (scope token, call id); the call id is "" when none was minted.
     """
     user = next(iter(auth.users()), "")
     if user:
-        cookie = "%s=%s" % (auth.SESSION_COOKIE, auth.issue_session(user))
         req = urllib.request.Request(
             "http://127.0.0.1:%d/api/scope?rep=%s" % (port, urllib.parse.quote(rep)),
-            headers={"Cookie": cookie})
+            headers={"Cookie": session_cookie(user)})
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.loads(resp.read().decode("utf-8"))["scopeToken"]
+                data = json.loads(resp.read().decode("utf-8"))
+                return data["scopeToken"], data.get("callId") or ""
         except Exception as exc:  # noqa: BLE001 - fall back, but say so
             print("  could not mint a call (%s); follow-ups will not see earlier "
                   "lookups" % exc)
-    return auth.issue_scope(rep)
+    return auth.issue_scope(rep), ""
+
+
+def session_cookie(user: str) -> str:
+    return "%s=%s" % (auth.SESSION_COOKIE, auth.issue_session(user))
+
+
+def watch_visuals(port: int, call: str, save_dir: str) -> None:
+    """Print each chart, table or map the page would get, as the page gets it.
+
+    They travel on the page's own live stream, not in the reply, so this reads
+    that stream the way the page does. With --save, each one is written out as
+    JSON as well, for drawing outside a call.
+    """
+    user = next(iter(auth.users()), "")
+    req = urllib.request.Request("http://127.0.0.1:%d/api/live?call=%s" % (port, call),
+                                 headers={"Cookie": session_cookie(user)})
+    count = 0
+    try:
+        with urllib.request.urlopen(req, timeout=600) as resp:
+            for raw in resp:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                item = json.loads(line[5:])
+                if item.get("type") != "visual":
+                    continue
+                visual = item["visual"]
+                size = len(visual.get("points") or visual.get("rows") or visual.get("labels") or [])
+                print("  screen: %s %r from %s, %d item(s)"
+                      % (visual["type"], visual.get("title"), visual.get("source"), size))
+                if save_dir:
+                    count += 1
+                    Path(save_dir).mkdir(parents=True, exist_ok=True)
+                    path = Path(save_dir) / ("visual-%d-%s.json" % (count, visual["type"]))
+                    path.write_text(json.dumps(visual, indent=1), encoding="utf-8")
+    except (ConnectionError, urllib.error.URLError) as exc:
+        if "timed out" in str(exc):
+            print("  screen: (live stream timed out: %s)" % exc)
+    except Exception as exc:  # noqa: BLE001 - say so, but never fail the test on it
+        print("  screen: (live stream stopped: %s: %s)" % (type(exc).__name__, exc))
 
 
 def ask(port: int, messages: list, scope: str, secret: str, model: str) -> str:
@@ -111,6 +153,8 @@ def main() -> int:
     parser.add_argument("--rep", default="", help="sign in as this rep")
     parser.add_argument("--port", type=int, default=0,
                         help="a server already running; otherwise one is started")
+    parser.add_argument("--save", default="", metavar="DIR",
+                        help="also write each chart, table or map to DIR as JSON")
     parser.add_argument("messages", nargs="*", help="one turn each")
     args = parser.parse_args()
 
@@ -148,7 +192,11 @@ def main() -> int:
     messages = [{"role": "system", "content": system}]
     failed = False
     try:
-        scope = call_scope(port, args.rep)
+        scope, call = call_scope(port, args.rep)
+        if call:
+            import threading
+            threading.Thread(target=watch_visuals, args=(port, call, args.save), daemon=True).start()
+            time.sleep(0.3)      # subscribed before the first reply goes out
         for turn in turns:
             print("  you   : %s" % turn)
             messages.append({"role": "user", "content": turn})
@@ -159,7 +207,9 @@ def main() -> int:
                 failed = True
                 break
             messages.append({"role": "assistant", "content": answer})
-            print("  agent : %s\n" % (answer or "(no answer)"))
+            print("  agent : %s" % (answer or "(no answer)"))
+            time.sleep(1.5)      # the visual follows the reply on the live stream
+            print("")
             failed = failed or not answer
     finally:
         if server:

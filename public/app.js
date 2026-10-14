@@ -4,6 +4,7 @@
 // for a short-lived conversation token / signed URL and hands it to the SDK.
 
 import { Conversation } from "https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.25.0/+esm";
+import { renderVisual } from "/visuals.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -34,6 +35,9 @@ const el = {
   transcript: $("transcript"),
   guide: $("guide"),
   guideGroups: $("guideGroups"),
+  topicBar: $("topicBar"),
+  topicBarTopics: $("topicBarTopics"),
+  topicBarPanel: $("topicBarPanel"),
   guideFoot: $("guideFoot"),
   composer: $("composer"),
   composerInput: $("composerInput"),
@@ -57,7 +61,7 @@ const state = {
   // Live agent reply being streamed in, so an aborted turn still shows text.
   streaming: { id: null, node: null, text: "" },
   // The rep's words as our own proxy saw them, ahead of ElevenLabs' copy.
-  live: { source: null, node: null, reply: null },
+  live: { source: null, node: null, reply: null, visuals: [] },
   // Counters surfaced in the debug header -- the fastest way to tell whether
   // the server's JSON events are reaching the browser at all.
   counts: { incoming: 0, transcripts: 0, agentReplies: 0, audioSent: 0 },
@@ -486,6 +490,7 @@ async function startConversation() {
           // The reply is confirmed, so the turn is over: the next words from
           // the rep start a new bubble.
           state.live.node = null;
+          state.live.visuals = [];        // confirmed: they stay with this turn
           if (state.live.reply && state.live.reply.isConnected) {
             state.live.reply = null;
           } else if (state.streaming.node) {
@@ -608,6 +613,10 @@ function openLiveTranscript(callId) {
     } catch {
       return;
     }
+    if (item && item.type === "visual") {
+      showVisual(item.visual);
+      return;
+    }
     if (!item || !item.text) return;
     if (item.type === "agent") {
       showLiveReply(item);
@@ -626,6 +635,8 @@ function openLiveTranscript(callId) {
     // to; ElevenLabs dropped it, so it comes off the screen.
     if (state.live.reply && state.live.reply.isConnected) state.live.reply.remove();
     state.live.reply = null;
+    for (const card of state.live.visuals) card.remove();
+    state.live.visuals = [];
     const node = state.live.node;
     if (node && node.isConnected) {
       node.textContent = item.text;
@@ -690,9 +701,29 @@ function renderReply(node, raw) {
   node.innerHTML = html.map((p) => (Array.isArray(p) ? `<ul>${p.join("")}</ul>` : p)).join("");
 }
 
+/**
+ * A chart, table or map under this turn's reply. It arrives after the reply's
+ * text, built by the server from the lookup rows, and goes if the reply does --
+ * ElevenLabs dropping the turn takes its picture with it.
+ */
+function showVisual(visual) {
+  let card = null;
+  try {
+    card = renderVisual(visual);
+  } catch (err) {
+    log("err", "visual", err.message || String(err));
+  }
+  if (!card) return;
+  logDetailed("in", "live visual", `${visual.type}: ${visual.title || ""}`);
+  el.transcript.appendChild(card);
+  // Only an unconfirmed turn's picture can still be withdrawn.
+  if (state.live.reply) state.live.visuals.push(card);
+  el.transcript.scrollTop = el.transcript.scrollHeight;
+}
+
 function closeLiveTranscript() {
   if (state.live.source) state.live.source.close();
-  state.live = { source: null, node: null, reply: null };
+  state.live = { source: null, node: null, reply: null, visuals: [] };
 }
 
 function teardown() {
@@ -886,95 +917,102 @@ async function loadGuide() {
     }
   }
 
-  // Topics as coloured bubbles -- areas, not questions -- with the example
-  // questions underneath in their topic's colour. One example per topic by
-  // default so the screen stays light; picking a topic shows all of its
-  // examples, picking it again goes back to one of each.
-  const topics = document.createElement("div");
-  topics.className = "guide-group";
-  const topicsLabel = document.createElement("span");
-  topicsLabel.className = "guide-subject";
-  topicsLabel.textContent = "Ask me about";
-  topics.appendChild(topicsLabel);
+  const TOPIC_COLOURS = 7;      // .topic-0 to .topic-6 in styles.css
 
-  const bubbles = document.createElement("div");
-  bubbles.className = "guide-topics";
-  topics.appendChild(bubbles);
-  el.guideGroups.appendChild(topics);
+  // An example question as a button. Clicking loads it into the composer
+  // rather than sending, so the user can edit it and can see where their
+  // words go.
+  const askButton = (question, i, after) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `guide-ask topic-${i % TOPIC_COLOURS}`;
+    btn.textContent = question;
+    btn.addEventListener("click", () => {
+      el.composerInput.value = question;
+      if (!el.composerInput.disabled) el.composerInput.focus();
+      else el.modeLabel.textContent = "Start the conversation, then send it";
+      if (after) after();
+    });
+    return btn;
+  };
 
+  // The topics, pinned above the chat. The guide inside the chat goes with
+  // the first message, and a rep mid-call still needs to know what they can
+  // ask -- so the areas stay in view the whole time, as coloured bubbles.
+  // Picking one opens its example questions under the bar; picking it again,
+  // or picking a question, closes them.
+  if (el.topicBar && el.topicBarTopics && el.topicBarPanel) {
+    let picked = null;
+    el.topicBarTopics.innerHTML = "";
+    const close = () => { picked = null; showPanel(); };
+    const showPanel = () => {
+      const panel = el.topicBarPanel;
+      panel.innerHTML = "";
+      panel.hidden = picked === null;
+      [...el.topicBarTopics.children].forEach((b, i) => {
+        b.classList.toggle("is-picked", picked === i);
+        b.setAttribute("aria-expanded", String(picked === i));
+      });
+      if (picked === null) return;
+      const group = groups[picked];
+      for (const question of (group.questions || []).slice(0, 6)) {
+        panel.appendChild(askButton(question, picked, close));
+      }
+      // What an answer sounds like. Spoken answers are a sentence or two, and
+      // someone expecting a table reads that as the lookup having failed.
+      const example = (group.answers || [])[0];
+      if (example) {
+        const reply = document.createElement("p");
+        reply.className = "guide-limit";
+        reply.textContent = "Answers like: “" + example + "”";
+        panel.appendChild(reply);
+      }
+    };
+    groups.forEach((group, i) => {
+      const bubble = document.createElement("button");
+      bubble.type = "button";
+      bubble.className = `guide-topic topic-${i % TOPIC_COLOURS}`;
+      bubble.textContent = group.subject;
+      bubble.setAttribute("aria-expanded", "false");
+      bubble.setAttribute("aria-controls", "topicBarPanel");
+      // The tables behind a topic, what they hold and what they cannot answer:
+      // there for anyone who wants it, costing nothing to anyone who does not.
+      bubble.title = (group.tables || [])
+        .map((t) => [t.label || t.name, t.about,
+                     t.notCovered && "Not in this data: " + t.notCovered]
+          .filter(Boolean).join("\n"))
+        .join("\n\n");
+      bubble.addEventListener("click", () => {
+        picked = picked === i ? null : i;
+        showPanel();
+      });
+      el.topicBarTopics.appendChild(bubble);
+    });
+    el.topicBar.hidden = false;
+  }
+
+  // Before the first message: one example per topic, in its topic's colour,
+  // so the empty chat shows what a question sounds like.
   const asking = document.createElement("div");
   asking.className = "guide-group";
   const askingLabel = document.createElement("span");
   askingLabel.className = "guide-subject";
+  askingLabel.textContent = "Try asking";
   asking.appendChild(askingLabel);
   const asks = document.createElement("div");
   asks.className = "guide-asks";
-  asking.appendChild(asks);
-
-  const TOPIC_COLOURS = 7;      // .topic-0 to .topic-6 in styles.css
-  let picked = null;
-
-  let showAsks = () => {
-    asks.innerHTML = "";
-    askingLabel.textContent = picked === null ? "Try asking" : `Try asking about ${groups[picked].subject}`;
-    groups.forEach((group, i) => {
-      if (picked !== null && picked !== i) return;
-      const questions = (group.questions || []).slice(0, picked === null ? 1 : 6);
-      for (const question of questions) {
-        const btn = document.createElement("button");
-        btn.type = "button";
-        btn.className = `guide-ask topic-${i % TOPIC_COLOURS}`;
-        btn.textContent = question;
-        // Clicking loads it into the composer rather than sending, so the user
-        // can edit it and can see where their words go.
-        btn.addEventListener("click", () => {
-          el.composerInput.value = question;
-          if (!el.composerInput.disabled) el.composerInput.focus();
-          else el.modeLabel.textContent = "Start the conversation, then send it";
-        });
-        asks.appendChild(btn);
-      }
-    });
-    [...bubbles.children].forEach((b, i) => {
-      b.classList.toggle("is-picked", picked === i);
-      b.setAttribute("aria-pressed", String(picked === i));
-    });
-  };
-
   groups.forEach((group, i) => {
-    const bubble = document.createElement("button");
-    bubble.type = "button";
-    bubble.className = `guide-topic topic-${i % TOPIC_COLOURS}`;
-    bubble.textContent = group.subject;
-    // The tables behind a topic, what they hold and what they cannot answer:
-    // there for anyone who wants it, costing nothing to anyone who does not.
-    bubble.title = (group.tables || [])
-      .map((t) => [t.label || t.name, t.about,
-                   t.notCovered && "Not in this data: " + t.notCovered]
-        .filter(Boolean).join("\n"))
-      .join("\n\n");
-    bubble.addEventListener("click", () => {
-      picked = picked === i ? null : i;
-      showAsks();
-    });
-    bubbles.appendChild(bubble);
+    const question = (group.questions || [])[0];
+    if (question) asks.appendChild(askButton(question, i));
   });
-
-  // What an answer sounds like, for the topic on show -- the first topic's
-  // until one is picked. Spoken answers are a sentence or two, and someone
-  // expecting a table reads that as the lookup having failed.
-  const reply = document.createElement("p");
-  reply.className = "guide-limit";
-  asking.appendChild(reply);
-  const showReply = () => {
-    const source = picked === null ? groups : [groups[picked]];
-    const example = source.map((g) => (g.answers || [])[0]).find(Boolean);
-    reply.hidden = !example;
-    reply.textContent = example ? "Answers like: “" + example + "”" : "";
-  };
-  const showAll = showAsks;
-  showAsks = () => { showAll(); showReply(); };
-  showAsks();
+  asking.appendChild(asks);
+  const example = groups.map((g) => (g.answers || [])[0]).find(Boolean);
+  if (example) {
+    const reply = document.createElement("p");
+    reply.className = "guide-limit";
+    reply.textContent = "Answers like: “" + example + "”";
+    asking.appendChild(reply);
+  }
   el.guideGroups.appendChild(asking);
 
   // Questions the PDF asks for that nothing can answer yet. Better read here

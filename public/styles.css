@@ -933,3 +933,143 @@ input[type="range"]::-moz-range-thumb {
   border-left: 2px solid var(--line-bright);
   padding-left: 9px;
 }
+
+/* ---------- charts, tables and maps under a reply (public/visuals.js) ---------- */
+
+.msg-visual {
+  align-self: stretch;
+  max-width: 100%;
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 10px 12px 12px;
+}
+.visual-title {
+  font-weight: 650;
+  font-size: 13px;
+  color: var(--pda-navy);
+  margin-bottom: 8px;
+}
+.visual-note { margin: 6px 0 0; font-size: 12px; color: var(--text-2); }
+
+.visual-legend {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.visual-legend li { display: flex; align-items: center; gap: 6px; }
+.visual-swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.visual-legend-value { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* bar: label above, bar and value beside each other -- long store names wrap */
+.vbar { display: flex; flex-direction: column; gap: 8px; }
+.vbar .visual-legend { margin: 0 0 2px; }
+.vbar-label { font-size: 12.5px; margin-bottom: 2px; }
+.vbar-line { display: flex; align-items: center; gap: 8px; }
+.vbar-line + .vbar-line { margin-top: 2px; }
+.vbar-track {
+  position: relative;
+  flex: 1;
+  height: 10px;
+  background: var(--surface-3);
+  border-radius: 5px;
+}
+.vbar-fill { height: 100%; border-radius: 5px; min-width: 2px; }
+.vbar-guide {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 0;
+  border-left: 2px dashed var(--pda-navy);
+}
+.vbar-value {
+  min-width: 64px;
+  text-align: right;
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* pie */
+.vpie { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.vpie-chart { width: 132px; height: 132px; flex: none; }
+.vpie .visual-legend { flex-direction: column; margin: 0; flex: 1; min-width: 160px; }
+.vpie .visual-legend-value { margin-left: auto; }
+
+/* line */
+.vline-chart { width: 100%; height: auto; display: block; }
+.vline-grid { stroke: var(--line); stroke-width: 1; }
+.vline-axis { font-size: 9.5px; fill: var(--text-2); font-family: var(--font); }
+
+/* table: scrolls sideways inside the card, never the page */
+.vtable-wrap { overflow-x: auto; }
+.vtable { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.vtable th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--line-bright);
+  padding: 4px 8px 5px 0;
+  white-space: nowrap;
+}
+.vtable td { border-bottom: 1px solid var(--line); padding: 5px 8px 5px 0; vertical-align: top; }
+.vtable .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vtable tr:last-child td { border-bottom: none; }
+
+/* map */
+.vmap { height: 280px; border-radius: var(--r-sm); overflow: hidden; background: var(--surface-3); }
+.vmap-popup { font-family: var(--font); font-size: 12.5px; line-height: 1.4; }
+.vmap-popup strong { display: block; color: var(--pda-navy); margin-bottom: 2px; }
+.vmap-end { font-weight: 650; color: var(--pda-navy); }
+
+@media (max-width: 520px) {
+  .vmap { height: 240px; }
+  .vpie-chart { width: 112px; height: 112px; }
+}
+
+/* ---------- topics pinned above the chat ---------- */
+
+.topic-bar {
+  display: grid;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+.topic-bar[hidden] { display: none; }
+.topic-bar-head { display: flex; align-items: center; gap: 10px; }
+.topic-bar-head .guide-subject { white-space: nowrap; flex: none; }
+.topic-bar-topics { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.topic-bar .guide-topic { font-size: 12.5px; padding: 4px 11px; white-space: nowrap; flex: none; }
+.topic-bar-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.topic-bar-panel[hidden] { display: none; }
+.topic-bar-panel .guide-ask { font-size: 13px; padding: 5px 12px; }
+.topic-bar-panel .guide-limit { flex-basis: 100%; margin: 2px 0 0; }
+
+/* Phones: the label goes above, and the bubbles scroll sideways in one row
+   instead of taking three lines of the chat; the fade says there are more. */
+@media (max-width: 520px) {
+  .topic-bar { padding: 8px 10px; }
+  .topic-bar-head { flex-direction: column; align-items: stretch; gap: 6px; }
+  .topic-bar-topics {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent);
+    mask-image: linear-gradient(90deg, #000 85%, transparent);
+    padding-right: 24px;
+  }
+  .topic-bar-topics::-webkit-scrollbar { display: none; }
+}
