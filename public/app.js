@@ -65,6 +65,11 @@ const state = {
   // False until a key is loaded and an agent is selected, so the idle pill can
   // distinguish "Ready" from "Not configured".
   ready: false,
+  // True until the agent, the rep list and the data warehouse are all ready.
+  // The rep list comes from Databricks, so on a cold warehouse it used to
+  // arrive many seconds after the page, which sat showing only "All reps" --
+  // and a call started then would have run as the manager view.
+  loading: true,
 };
 
 // ---------------------------------------------------------------- debug log
@@ -248,8 +253,18 @@ function render() {
       ? STATUS_LABEL[status]
       : "Start conversation";
 
+  if (state.loading) {
+    el.callBtn.disabled = true;
+    if (el.repSelect) el.repSelect.disabled = true;
+    el.callBtnLabel.textContent = "Getting ready…";
+    el.statusText.textContent = "Getting ready";
+  }
+
   el.orb.className = "orb";
-  if (busy) {
+  if (state.loading) {
+    el.orb.classList.add("connecting");
+    el.modeLabel.textContent = "Getting ready — loading your reps and waking the data…";
+  } else if (busy) {
     el.orb.classList.add("connecting");
     el.modeLabel.textContent = STATUS_LABEL[status];
   } else if (live) {
@@ -1013,6 +1028,8 @@ async function init() {
     state.config = await getJSON("/api/config");
   } catch (err) {
     showError(`Could not read server config: ${err.message}`);
+    state.loading = false;
+    render();
     return;
   }
 
@@ -1024,6 +1041,8 @@ async function init() {
     el.keyNote.classList.add("warn");
     el.settingsPanel.hidden = false;
     showError("ELEVENLABS_API_KEY is missing from .env — the agent cannot be reached.");
+    state.loading = false;
+    render();
     return;
   }
 
@@ -1057,9 +1076,26 @@ async function init() {
   if (!el.agentIdInput.value) el.settingsPanel.hidden = false;
   state.ready = Boolean(state.config.hasApiKey && el.agentIdInput.value);
   render();
-  refreshAgentInfo();
-  loadReps();
   loadGuide();
+
+  // Hold the call button until all three are in: the agent, the rep list, and
+  // a warehouse that answers, so the first question is not the slow one. They
+  // run side by side; the rep list usually also wakes the warehouse.
+  const allOption = el.repSelect && el.repSelect.options[0];
+  if (allOption) allOption.textContent = "Loading reps…";
+  const [, , ready] = await Promise.allSettled([
+    refreshAgentInfo(),
+    loadReps(),
+    getJSON("/api/ready"),
+  ]);
+  if (allOption) allOption.textContent = "All reps (manager view)";
+  const awake = ready.status === "fulfilled" && ready.value && ready.value.ready;
+  log("out", "ready", awake ? "data warehouse awake" : "data warehouse still waking");
+  if (!awake) {
+    showRepNote("The data is still waking up, so the first answer may take a little longer.");
+  }
+  state.loading = false;
+  render();
 }
 
 init();

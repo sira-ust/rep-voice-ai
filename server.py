@@ -123,6 +123,57 @@ def warm_warehouse(reason: str) -> None:
     threading.Thread(target=run, daemon=True, name="dbx-warm").start()
 
 
+# The page waits for this before it lets a call start, so a rep's first
+# question is not the one that sits through a cold warehouse. A query that
+# answered in the last READY_FOR seconds counts as proof it is awake.
+READY_FOR = 5 * 60
+_ready_at = 0.0
+_ready_lock = threading.Lock()
+
+
+def mark_warehouse_ready() -> None:
+    global _ready_at
+    with _ready_lock:
+        _ready_at = time.time()
+
+
+def wait_for_warehouse(timeout: int = 50) -> tuple[bool, str]:
+    """Block until the warehouse answers SELECT 1, or `timeout` seconds pass.
+
+    Unlike warm_warehouse, which only nudges, this waits: wait_timeout makes
+    Databricks hold the request until the statement finishes, which on a cold
+    warehouse is the start-up time itself.
+    """
+    if not WARM_READY:
+        return True, "no warehouse configured"
+    with _ready_lock:
+        if time.time() - _ready_at < READY_FOR:
+            return True, "recently answered"
+    body = json.dumps({
+        "warehouse_id": DBX_WAREHOUSE,
+        "statement": "SELECT 1",
+        "wait_timeout": "%ds" % max(5, min(50, timeout)),
+        "on_wait_timeout": "CONTINUE",
+        "disposition": "INLINE",
+        "format": "JSON_ARRAY",
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        DBX_HOST + "/api/2.0/sql/statements/", data=body, method="POST",
+        headers={"Authorization": "Bearer " + DBX_WARM_TOKEN,
+                 "Content-Type": "application/json",
+                 "User-Agent": "Mozilla/5.0 (compatible) elevenlabs-webui/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout + 10) as resp:
+            state = ((json.loads(resp.read().decode("utf-8") or "{}").get("status") or {})
+                     .get("state"))
+    except Exception as exc:  # noqa: BLE001 - the page decides what to do
+        return False, str(exc)
+    if state == "SUCCEEDED":
+        mark_warehouse_ready()
+        return True, "awake"
+    return False, "warehouse still starting (%s)" % state
+
+
 # ---- LLM proxy: the only place Databricks is ever reached from a live call --
 # ElevenLabs POSTs here (CUSTOM_LLM_URL) instead of straight to the real
 # Gemma/vLLM host. We run the model, execute any tool call it asks for
@@ -866,6 +917,7 @@ def sales_reps() -> list:
     _reps_error = ""
     with _reps_lock:
         _reps_cache, _reps_fetched = reps, time.time()
+    mark_warehouse_ready()
     return reps
 
 
@@ -1210,6 +1262,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if route == "/api/live":
             self._stream_live((query.get("call") or [""])[0])
+            return
+
+        if route == "/api/ready":
+            # Held open until the warehouse answers, so the page can show
+            # "Getting ready" instead of letting the first question be the slow
+            # one. A successful rep-list query already proves it is awake.
+            awake, detail = wait_for_warehouse()
+            self._json(200, {"ready": awake, "detail": detail})
             return
 
         if route == "/api/reps":
@@ -1582,6 +1642,10 @@ def main() -> int:
 
     try:
         httpd = ThreadingHTTPServer((args.host, args.port), Handler)
+        # The first page to open used to fetch the rep list itself and wait on
+        # a cold warehouse while the picker showed only "All reps". Fetching it
+        # now usually has it ready before anyone signs in.
+        threading.Thread(target=sales_reps, daemon=True, name="reps-prefetch").start()
     except OSError as exc:
         print("  Could not bind %s:%d -- %s" % (args.host, args.port, exc), file=sys.stderr)
         print("  Try: python server.py --port 8081", file=sys.stderr)
