@@ -637,7 +637,8 @@ def read_account_rhythm(r: dict) -> str:
     days12 = int(_num(r.get("invoice_days_12m")) or 0)
     gap, since, past = _num(r.get("usual_gap_days")), _num(r.get("days_since_last_invoice")), _num(r.get("days_past_usual"))
     all_time = _num(r.get("invoice_days_all_time"))
-    if all_time and since is not None and (since > 180 or (past or 0) > 6):
+    status = (r.get("rhythm_status") or "").lower()
+    if all_time and since is not None and status in ("former regular", "dormant"):
         # The win-back list: a store that bought often and stopped. "Buys
         # occasionally" would describe its last year, not what it was.
         body = "a former regular -- bought on %d days in all; last invoice %d days ago" % (all_time, since)
