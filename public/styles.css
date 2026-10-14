@@ -780,11 +780,43 @@ input[type="range"]::-moz-range-thumb {
   padding: 4px 2px;
 }
 
-.guide-lede {
-  margin: 0;
-  font-size: 13.5px;
-  color: var(--text-2);
-  max-width: 46ch;
+/* Topic colours: one per area, shared by its bubble and its example
+   questions so the eye can match them. fg is text, bg the fill, line the
+   border and the picked state. */
+.topic-0 { --tc-fg: #1A5FA8; --tc-bg: #E7F0FB; --tc-line: #9CC3EE; }  /* blue   */
+.topic-1 { --tc-fg: #1F7A4D; --tc-bg: #E6F4EC; --tc-line: #9AD3B3; }  /* green  */
+.topic-2 { --tc-fg: #A85A12; --tc-bg: #FCEFE2; --tc-line: #F0C08F; }  /* orange */
+.topic-3 { --tc-fg: #6B3FA0; --tc-bg: #F1EAFA; --tc-line: #C7AEE8; }  /* purple */
+.topic-4 { --tc-fg: #0F6E78; --tc-bg: #E3F4F5; --tc-line: #93D0D6; }  /* teal   */
+.topic-5 { --tc-fg: #A43A5A; --tc-bg: #FBE8EE; --tc-line: #EDA9BE; }  /* rose   */
+.topic-6 { --tc-fg: #4A5A6B; --tc-bg: #EEF1F4; --tc-line: #B9C4CF; }  /* slate  */
+
+.guide-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.guide-topic {
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--tc-fg);
+  background: var(--tc-bg);
+  border: 1px solid var(--tc-line);
+  border-radius: 999px;
+  padding: 6px 13px;
+  cursor: pointer;
+  transition: box-shadow .15s, background .15s;
+}
+
+.guide-topic:hover { box-shadow: 0 0 0 2px var(--tc-line); }
+
+/* The picked topic fills solid, so it reads as "showing this one". */
+.guide-topic.is-picked {
+  color: #fff;
+  background: var(--tc-fg);
+  border-color: var(--tc-fg);
 }
 
 .guide-groups {
@@ -845,6 +877,19 @@ input[type="range"]::-moz-range-thumb {
 .guide-ask:hover {
   border-color: var(--accent);
   background: var(--accent-soft);
+}
+
+/* An example question in its topic's colour. */
+.guide-ask[class*="topic-"] {
+  background: var(--tc-bg);
+  border-color: var(--tc-line);
+  border-left: 4px solid var(--tc-fg);
+}
+
+.guide-ask[class*="topic-"]:hover {
+  background: var(--tc-bg);
+  border-color: var(--tc-fg);
+  border-left-color: var(--tc-fg);
 }
 
 .guide-ask::before {

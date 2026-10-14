@@ -886,71 +886,95 @@ async function loadGuide() {
     }
   }
 
-  // Two lists: what it knows about, then what asking looks like. Earlier this
-  // was a block per topic carrying its own tables, description and caveats,
-  // which was six of everything on the one screen meant to get someone talking.
+  // Topics as coloured bubbles -- areas, not questions -- with the example
+  // questions underneath in their topic's colour. One example per topic by
+  // default so the screen stays light; picking a topic shows all of its
+  // examples, picking it again goes back to one of each.
   const topics = document.createElement("div");
   topics.className = "guide-group";
   const topicsLabel = document.createElement("span");
   topicsLabel.className = "guide-subject";
-  topicsLabel.textContent = "Topics";
+  topicsLabel.textContent = "Ask me about";
   topics.appendChild(topicsLabel);
 
-  const topicList = document.createElement("ul");
-  topicList.className = "guide-about";
-  for (const group of groups) {
-    const li = document.createElement("li");
-    li.textContent = group.subject;
-    // The tables behind a topic, what they hold and what they cannot answer:
-    // there for anyone who wants it, costing nothing to anyone who does not.
-    li.title = (group.tables || [])
-      .map((t) => [t.label || t.name, t.about,
-                   t.notCovered && "Not in this data: " + t.notCovered]
-        .filter(Boolean).join("\n"))
-      .join("\n\n");
-    topicList.appendChild(li);
-  }
-  topics.appendChild(topicList);
+  const bubbles = document.createElement("div");
+  bubbles.className = "guide-topics";
+  topics.appendChild(bubbles);
   el.guideGroups.appendChild(topics);
 
   const asking = document.createElement("div");
   asking.className = "guide-group";
   const askingLabel = document.createElement("span");
   askingLabel.className = "guide-subject";
-  askingLabel.textContent = "Types of questions";
   asking.appendChild(askingLabel);
-
   const asks = document.createElement("div");
   asks.className = "guide-asks";
-  // Two per topic. One left three questions standing for three broad sections,
-  // which reads as a thin tool rather than a shorthand.
-  for (const group of groups) {
-    for (const question of (group.questions || []).slice(0, 2)) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "guide-ask";
-      btn.textContent = question;
-      // Clicking loads it into the composer rather than sending, so the user
-      // can edit it and can see where their words go.
-      btn.addEventListener("click", () => {
-        el.composerInput.value = question;
-        if (!el.composerInput.disabled) el.composerInput.focus();
-        else el.modeLabel.textContent = "Start the conversation, then send it";
-      });
-      asks.appendChild(btn);
-    }
-  }
   asking.appendChild(asks);
 
-  // What an answer sounds like, once. Spoken answers are a sentence or two,
-  // and someone expecting a table reads that as the lookup having failed.
-  const example = groups.map((g) => (g.answers || [])[0]).find(Boolean);
-  if (example) {
-    const reply = document.createElement("p");
-    reply.className = "guide-limit";
-    reply.textContent = "Answers like: \u201c" + example + "\u201d";
-    asking.appendChild(reply);
-  }
+  const TOPIC_COLOURS = 7;      // .topic-0 to .topic-6 in styles.css
+  let picked = null;
+
+  let showAsks = () => {
+    asks.innerHTML = "";
+    askingLabel.textContent = picked === null ? "Try asking" : `Try asking about ${groups[picked].subject}`;
+    groups.forEach((group, i) => {
+      if (picked !== null && picked !== i) return;
+      const questions = (group.questions || []).slice(0, picked === null ? 1 : 6);
+      for (const question of questions) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = `guide-ask topic-${i % TOPIC_COLOURS}`;
+        btn.textContent = question;
+        // Clicking loads it into the composer rather than sending, so the user
+        // can edit it and can see where their words go.
+        btn.addEventListener("click", () => {
+          el.composerInput.value = question;
+          if (!el.composerInput.disabled) el.composerInput.focus();
+          else el.modeLabel.textContent = "Start the conversation, then send it";
+        });
+        asks.appendChild(btn);
+      }
+    });
+    [...bubbles.children].forEach((b, i) => {
+      b.classList.toggle("is-picked", picked === i);
+      b.setAttribute("aria-pressed", String(picked === i));
+    });
+  };
+
+  groups.forEach((group, i) => {
+    const bubble = document.createElement("button");
+    bubble.type = "button";
+    bubble.className = `guide-topic topic-${i % TOPIC_COLOURS}`;
+    bubble.textContent = group.subject;
+    // The tables behind a topic, what they hold and what they cannot answer:
+    // there for anyone who wants it, costing nothing to anyone who does not.
+    bubble.title = (group.tables || [])
+      .map((t) => [t.label || t.name, t.about,
+                   t.notCovered && "Not in this data: " + t.notCovered]
+        .filter(Boolean).join("\n"))
+      .join("\n\n");
+    bubble.addEventListener("click", () => {
+      picked = picked === i ? null : i;
+      showAsks();
+    });
+    bubbles.appendChild(bubble);
+  });
+
+  // What an answer sounds like, for the topic on show -- the first topic's
+  // until one is picked. Spoken answers are a sentence or two, and someone
+  // expecting a table reads that as the lookup having failed.
+  const reply = document.createElement("p");
+  reply.className = "guide-limit";
+  asking.appendChild(reply);
+  const showReply = () => {
+    const source = picked === null ? groups : [groups[picked]];
+    const example = source.map((g) => (g.answers || [])[0]).find(Boolean);
+    reply.hidden = !example;
+    reply.textContent = example ? "Answers like: “" + example + "”" : "";
+  };
+  const showAll = showAsks;
+  showAsks = () => { showAll(); showReply(); };
+  showAsks();
   el.guideGroups.appendChild(asking);
 
   // Questions the PDF asks for that nothing can answer yet. Better read here

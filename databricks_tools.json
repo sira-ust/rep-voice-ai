@@ -99,38 +99,6 @@
   },
   "tools": [
     {
-      "name": "lookup_rep_month",
-      "table": "ust_databricks.ust_reporting.mart_rep_period_status",
-      "lookup_column": "rep_name",
-      "match": "contains",
-      "columns": [
-        "orders_submitted",
-        "order_value_total",
-        "order_value_avg",
-        "accounts_ordered",
-        "order_value_largest",
-        "order_value_projected",
-        "prev_order_value_total",
-        "order_value_change_pct",
-        "as_of_date"
-      ],
-      "filters": [
-        "period_type = 'month'",
-        "is_current"
-      ],
-      "limit": 1,
-      "value_label": "rep being asked about",
-      "example": "Ken Tov",
-      "description": "How ONE REP is doing this month, by their name. Use for a rep asking about their own performance -- orders submitted, total and average order value, their biggest order, how many accounts ordered, where they are on pace to land by month end, and how that compares with last month. This is the rep's own numbers, not one account's: for a single store use lookup_account_status.",
-      "subject": "How am I doing?",
-      "sample_questions": [
-        "How am I doing this month?",
-        "How does that compare to last month?",
-        "Where will I land by month end?"
-      ],
-      "answer_example": "A hundred and fifty-six orders so far this month, about two million dollars, across seventy-seven accounts. At this pace you land near two point seven."
-    },
-    {
       "name": "lookup_rep_sales",
       "table": "ust_databricks.ust_reporting.mart_rep_period_sales",
       "lookup_column": "rep_name",
@@ -169,7 +137,7 @@
       "value_label": "rep being asked about",
       "example": "Ken Tov",
       "description": "Each row carries in_words: the period already read correctly -- pace, projection, what is still needed, how a finished month ended, the same days last year, margin and brand share. The current month also carries vs_last_month, the comparison with last month already made. Answer from in_words and vs_last_month; do not work comparisons out from the other columns. ONE REP's POSTED sales against their TARGET, by their name -- every channel (PDA, app, web, phone, email), from January 2025. Answers 'am I going to make my number', how much they still need, selling days left, where they will land, MARGIN and OWN-BRAND share, and the change on last year. One row each for the current day, week, month, quarter and year, plus LAST MONTH (period_type month, is_current false) -- a finished month, whose pct_of_target_to_date is how it FINISHED against its target. change_vs_same_days_last_year compares a row with the same days a YEAR earlier, never with last month. Percentages are fractions: multiply by 100. pct_of_target_to_date is the verdict -- 1.0 is exactly on pace, 1.39 is 39% ahead, 0.85 is 15% behind. For 'will I make it' use sales_projected and pct_of_target_projected. Use brand_pct_of_sales; brand_pct_of_product_sales is NAV's own figure on a different denominator, only for why the two differ. Say as_of_date: these post days after an order is keyed. For orders submitted in the app this month use lookup_rep_month instead -- never quote one as the other.",
-      "subject": "Am I on target?",
+      "subject": "Target & margin",
       "sample_questions": [
         "Am I going to make my number this month?",
         "What's my margin and brand share?",
@@ -209,7 +177,7 @@
       "value_label": "rep whose accounts to list",
       "example": "Ryan Tran",
       "description": "Which of ONE REP's OWN accounts most need a call -- the DEFAULT for who to call or visit, which regulars have gone quiet, who has stopped ordering or is overdue: regular buyers that have gone past their usual gap between orders -- 'lapsing' (1.5x or more) first, then 'due'. Each row has in_words -- answer from it: how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days. Rhythm is per store across every rep's invoices: usual_gap_days is the median gap between invoice days over the last year, days_past_usual how many of those gaps it has now been. Stores gone for months are left out on purpose: those are lookup_winback_accounts. For a place the rep is going use lookup_accounts_in_city or lookup_accounts_on_route; for one named store use lookup_account_status.",
-      "subject": "Who should I call?",
+      "subject": "Who to call",
       "sample_questions": [
         "Which customers should I call this week?"
       ],
@@ -246,7 +214,7 @@
       "value_label": "rep whose accounts to list",
       "example": "Ryan Tran",
       "description": "ONE REP's former regulars that have gone quiet for a long time, biggest former buyers first. Win-back candidates, not this week's calls: use ONLY when the rep asks about OLD or LOST customers, or ones gone for many months -- 'win back', 'stopped a long time ago', 'used to buy'. A regular that has 'gone quiet' or 'stopped ordering' without 'a long time' is lookup_accounts_to_call. Each row has in_words -- answer from it: how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days.",
-      "subject": "Who should I call?",
+      "subject": "Who to call",
       "sample_questions": [
         "Which old customers could I win back?"
       ],
@@ -281,7 +249,7 @@
       "value_label": "city the rep is going to",
       "example": "Indianapolis",
       "description": "The rep's OWN accounts in ONE CITY they are going to, the ones most past their usual buying gap first, with delivery days and whether an appointment is needed. Use when a rep says where they will be: 'I'm in Indianapolis Thursday'. Send just the city name. If they name a day, favour accounts whose delivery_days include it. Each row has in_words -- answer from it: how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days. Rhythm is per store across every rep's invoices: usual_gap_days is the median gap between invoice days over the last year, days_past_usual how many of those gaps it has now been.",
-      "subject": "Plan a trip",
+      "subject": "Trip planning",
       "sample_questions": [
         "I'm in Indianapolis on Thursday, who should I see?"
       ],
@@ -322,142 +290,11 @@
       "value_label": "trip, as 'FROM CITY to TO CITY'",
       "example": "Milwaukee to Indianapolis",
       "description": "The rep's OWN accounts ALONG A DRIVE between two cities: within 15 miles of the straight line from one to the other, from 15 miles out of the starting city to the destination, the ones past their usual buying gap first. Send the value as 'Milwaukee to Indianapolis'. If the rep names only where they are going, ask where they are driving from -- or use lookup_accounts_in_city if they only want that city. Distances are as the crow flies, not by road: say 'about N miles off the way'. Each row: miles_from_start (driving order), miles_off_route, route_miles. Each row has in_words -- answer from it: how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days. No rows usually means a city name was not recognised: ask them to repeat it.",
-      "subject": "Plan a trip",
+      "subject": "Trip planning",
       "sample_questions": [
         "I'm driving from Milwaukee to Indianapolis, who can I stop at?"
       ],
       "answer_example": "On the way, a store in Kenosha is about 4 miles off the route and past its usual gap. In Indianapolis, Pyone Cho is due."
-    },
-    {
-      "name": "lookup_biggest_orders",
-      "table": "ust_databricks.ust_facts.fct_orders",
-      "from": "ust_databricks.ust_facts.fct_orders o JOIN ust_databricks.ust_dims.dim_customers c ON o.customer_key = c.customer_key JOIN ust_databricks.ust_dims.dim_reps r ON o.sales_code = r.sales_code",
-      "lookup_column": "r.rep_name",
-      "match": "contains",
-      "columns": [
-        "c.customer_name",
-        "c.city",
-        "o.grand_total",
-        "o.total_item_count",
-        "o.order_channel",
-        "o.submitted_date"
-      ],
-      "filters": [
-        "o.submitted_date >= date_trunc('month', current_date())"
-      ],
-      "order_by": "o.grand_total DESC",
-      "limit": 5,
-      "value_label": "rep whose orders to list",
-      "example": "Ryan Tran",
-      "description": "ONE REP's biggest orders this month, largest first, each WITH THE CUSTOMER that placed it, how many items were on it, which channel it came through and the date. Use when a rep asks about their biggest or largest order, who it was from, or how their orders split across channels. Requires the rep's name. For their month as a whole -- totals, averages, pace -- use lookup_rep_month.",
-      "subject": "How am I doing?",
-      "sample_questions": [
-        "What is my largest order and which customer?",
-        "Which of my orders came through the app?"
-      ],
-      "answer_example": "Your biggest was fifty nine thousand three hundred and thirty four dollars, from Asian Food Store in Appleton, four hundred and ninety seven items, through the PDA on the second."
-    },
-    {
-      "name": "lookup_rep_month_mix",
-      "table": "ust_databricks.ust_reporting.mart_rep_period_item_mix",
-      "lookup_column": "rep_name",
-      "match": "contains",
-      "columns": [
-        "invoice_lines",
-        "distinct_items",
-        "distinct_categories",
-        "promo_line_share",
-        "new_item_line_share",
-        "return_line_rate",
-        "as_of_date"
-      ],
-      "filters": [
-        "period_type = 'month'",
-        "is_current"
-      ],
-      "limit": 1,
-      "value_label": "rep whose mix to break down",
-      "example": "Ryan Tran",
-      "description": "What ONE REP's month was MADE OF: how many invoice lines and distinct items and categories, and the share of LINES that were promotional or new items, plus the rate at which lines came back. Shares here are by line, not by value -- too little of the invoice history carries a price for a value share to mean anything, so if someone asks for the split by value, say it is by line and that value coverage is too thin to divide up. These are invoiced lines, not orders submitted: for order counts, totals and pace use lookup_rep_month, and for individual orders use lookup_biggest_orders.",
-      "subject": "How am I doing?",
-      "sample_questions": [
-        "What was my month made of?",
-        "How much of my month was promo or new items?"
-      ],
-      "answer_example": "Two thousand and ninety-eight lines across thirteen hundred items and ten categories. Promotions were about four percent of lines, new items about six."
-    },
-    {
-      "name": "lookup_account_invoiced",
-      "table": "ust_databricks.ust_reporting.mart_account_period_status",
-      "lookup_column": "customer_key",
-      "match": "exact",
-      "columns": [
-        "owner_rep_name",
-        "customer_name",
-        "period_start",
-        "as_of_date",
-        "invoice_count",
-        "invoice_value",
-        "value_coverage",
-        "invoice_value_avg",
-        "returned_value",
-        "return_rate_value",
-        "return_rate_is_measurable",
-        "returns_over_threshold",
-        "prev_invoice_value",
-        "invoice_value_change_pct"
-      ],
-      "filters": [
-        "period_type = 'month'",
-        "is_current",
-        "customer_name IS NOT NULL"
-      ],
-      "limit": 1,
-      "value_label": "account key being asked about",
-      "example": "RED005",
-      "description": "What ONE account was actually INVOICED this month, and what came back as returns. Use for what a store really bought, their invoice value, how it compares with last month, and whether returns are running high. This is posted invoices, which is different from orders submitted -- for order activity and when they last ordered use lookup_account_status instead.",
-      "subject": "How am I doing?",
-      "sample_questions": [
-        "What did Red Apple Market buy last month?",
-        "How are returns looking for that account?"
-      ],
-      "answer_example": "Five invoices this month. Only part of that is priced in our data, so I can give you the count with confidence but not the full value.",
-      "rep_column": "owner_rep_name"
-    },
-    {
-      "name": "lookup_account_top_items",
-      "table": "ust_databricks.ust_reporting.mart_account_item_history",
-      "lookup_column": "customer_key",
-      "match": "exact",
-      "columns": [
-        "owner_rep_name",
-        "item_label",
-        "item_category_name",
-        "times_purchased",
-        "last_purchase_date",
-        "days_since_last_purchase",
-        "median_days_between_purchases",
-        "reorder_status",
-        "avg_quantity_per_purchase",
-        "primary_quantity_uom",
-        "is_in_stock"
-      ],
-      "order_by": "times_purchased DESC",
-      "limit": 8,
-      "value_label": "account key being asked about",
-      "example": "RED005",
-      "description": "What ONE account actually buys, item by item, most often first. Use for what a store orders, how often they take it, and when they last did. This is their purchase history -- for what to PITCH them next use lookup_pitch_list, which ranks by opportunity rather than by how often they have bought.",
-      "subject": "What should I sell them?",
-      "sample_questions": [
-        "What does Red Apple Market usually buy?",
-        "What are their top items?"
-      ],
-      "answer_example": "They buy KYJ Pork Sausage most often — five hundred and ninety-five times, last on the eleventh of August.",
-      "filters": [
-        "item_label IS NOT NULL",
-        "customer_name IS NOT NULL"
-      ],
-      "rep_column": "owner_rep_name"
     },
     {
       "name": "lookup_pitch_list",
@@ -485,12 +322,47 @@
       "value_label": "account key being asked about",
       "example": "RED005",
       "description": "What to walk in and TALK ABOUT with ONE account: items ranked by opportunity, each with the reason it made the list and the evidence behind it. Use when a rep asks what to sell, pitch, recommend or bring up with a store. Every row says whether it is evidence based -- built on that account's own buying -- or only a suggestion, and those two must be said differently.",
-      "subject": "What should I sell them?",
+      "subject": "What to sell",
       "sample_questions": [
         "What should I sell Red Apple Market?",
         "What should I talk to them about?"
       ],
       "answer_example": "They are due for Soy Bean with Ginger Sauce, and Punjas Butter Snap Cookies are worth a mention. Want the detail on either?",
+      "filters": [
+        "item_label IS NOT NULL",
+        "customer_name IS NOT NULL"
+      ],
+      "rep_column": "owner_rep_name"
+    },
+    {
+      "name": "lookup_account_top_items",
+      "table": "ust_databricks.ust_reporting.mart_account_item_history",
+      "lookup_column": "customer_key",
+      "match": "exact",
+      "columns": [
+        "owner_rep_name",
+        "item_label",
+        "item_category_name",
+        "times_purchased",
+        "last_purchase_date",
+        "days_since_last_purchase",
+        "median_days_between_purchases",
+        "reorder_status",
+        "avg_quantity_per_purchase",
+        "primary_quantity_uom",
+        "is_in_stock"
+      ],
+      "order_by": "times_purchased DESC",
+      "limit": 8,
+      "value_label": "account key being asked about",
+      "example": "RED005",
+      "description": "What ONE account actually buys, item by item, most often first. Use for what a store orders, how often they take it, and when they last did. This is their purchase history -- for what to PITCH them next use lookup_pitch_list, which ranks by opportunity rather than by how often they have bought.",
+      "subject": "What to sell",
+      "sample_questions": [
+        "What does Red Apple Market usually buy?",
+        "What are their top items?"
+      ],
+      "answer_example": "They buy KYJ Pork Sausage most often — five hundred and ninety-five times, last on the eleventh of August.",
       "filters": [
         "item_label IS NOT NULL",
         "customer_name IS NOT NULL"
@@ -523,7 +395,7 @@
       "value_label": "product being asked about",
       "example": "coconut milk",
       "description": "Find PRODUCTS by what they are called. Use when someone asks whether we carry something, what brands or sizes there are, or what is in stock, and they have named the product rather than given a part number. Send two or three plain English words. Returns the item number, price, stock and whether it is on promotion. Nothing to do with customers or accounts.",
-      "subject": "What should I sell them?",
+      "subject": "Products & stock",
       "sample_questions": [
         "Do we carry coconut milk?",
         "What jasmine rice do we stock?",
@@ -557,7 +429,7 @@
       "value_label": "part number",
       "example": "11050",
       "description": "ONE product by its exact part number. Use when a caller reads out a number rather than a name. Returns stock on hand and shippable, price, case size, any live promotion and whether the item is discontinued. If they described the product in words instead, use search_items.",
-      "subject": "What should I sell them?",
+      "subject": "Products & stock",
       "sample_questions": [
         "Is part 11050 in stock?",
         "What's the promo on 11050?"
@@ -585,7 +457,7 @@
       "value_label": "store or account being asked about",
       "example": "asian market",
       "description": "Find a customer's account key from the name a caller said out loud. Use this FIRST whenever someone names a store rather than giving a key. Returns every active account matching those words with its city, post code and owning rep, because store names repeat -- many accounts share a name. Read the city and owner back and ask which one they mean before looking anything else up. Do not use this for products.",
-      "subject": "Look up an account",
+      "subject": "Account lookup",
       "sample_questions": [
         "How is Asian Market doing?",
         "Look up Lee's Sandwiches"
@@ -618,7 +490,7 @@
       "value_label": "customer key",
       "example": "RED005",
       "description": "How ONE account is doing, by its customer key. Use for how an account is performing, when they last ordered, how long it has been, their recent order value, which days they accept deliveries and whether they need attention. If the caller gave a name instead of a key, run find_customer_by_name first. Do not use this for products or for a rep's own numbers.",
-      "subject": "Look up an account",
+      "subject": "Account lookup",
       "sample_questions": [
         "How is RED005 doing?",
         "When did RED005 last order?",
@@ -630,6 +502,134 @@
         "customer_name IS NOT NULL",
         "is_owned_by_rep"
       ]
+    },
+    {
+      "name": "lookup_account_invoiced",
+      "table": "ust_databricks.ust_reporting.mart_account_period_status",
+      "lookup_column": "customer_key",
+      "match": "exact",
+      "columns": [
+        "owner_rep_name",
+        "customer_name",
+        "period_start",
+        "as_of_date",
+        "invoice_count",
+        "invoice_value",
+        "value_coverage",
+        "invoice_value_avg",
+        "returned_value",
+        "return_rate_value",
+        "return_rate_is_measurable",
+        "returns_over_threshold",
+        "prev_invoice_value",
+        "invoice_value_change_pct"
+      ],
+      "filters": [
+        "period_type = 'month'",
+        "is_current",
+        "customer_name IS NOT NULL"
+      ],
+      "limit": 1,
+      "value_label": "account key being asked about",
+      "example": "RED005",
+      "description": "What ONE account was actually INVOICED this month, and what came back as returns. Use for what a store really bought, their invoice value, how it compares with last month, and whether returns are running high. This is posted invoices, which is different from orders submitted -- for order activity and when they last ordered use lookup_account_status instead.",
+      "subject": "Account lookup",
+      "sample_questions": [
+        "What did Red Apple Market buy last month?",
+        "How are returns looking for that account?"
+      ],
+      "answer_example": "Five invoices this month. Only part of that is priced in our data, so I can give you the count with confidence but not the full value.",
+      "rep_column": "owner_rep_name"
+    },
+    {
+      "name": "lookup_rep_month",
+      "table": "ust_databricks.ust_reporting.mart_rep_period_status",
+      "lookup_column": "rep_name",
+      "match": "contains",
+      "columns": [
+        "orders_submitted",
+        "order_value_total",
+        "order_value_avg",
+        "accounts_ordered",
+        "order_value_largest",
+        "order_value_projected",
+        "prev_order_value_total",
+        "order_value_change_pct",
+        "as_of_date"
+      ],
+      "filters": [
+        "period_type = 'month'",
+        "is_current"
+      ],
+      "limit": 1,
+      "value_label": "rep being asked about",
+      "example": "Ken Tov",
+      "description": "How ONE REP is doing this month, by their name. Use for a rep asking about their own performance -- orders submitted, total and average order value, their biggest order, how many accounts ordered, where they are on pace to land by month end, and how that compares with last month. This is the rep's own numbers, not one account's: for a single store use lookup_account_status.",
+      "subject": "Orders",
+      "sample_questions": [
+        "How many orders have I submitted this month?",
+        "How do my orders compare to last month?",
+        "Where will my orders land by month end?"
+      ],
+      "answer_example": "A hundred and fifty-six orders so far this month, about two million dollars, across seventy-seven accounts. At this pace you land near two point seven."
+    },
+    {
+      "name": "lookup_biggest_orders",
+      "table": "ust_databricks.ust_facts.fct_orders",
+      "from": "ust_databricks.ust_facts.fct_orders o JOIN ust_databricks.ust_dims.dim_customers c ON o.customer_key = c.customer_key JOIN ust_databricks.ust_dims.dim_reps r ON o.sales_code = r.sales_code",
+      "lookup_column": "r.rep_name",
+      "match": "contains",
+      "columns": [
+        "c.customer_name",
+        "c.city",
+        "o.grand_total",
+        "o.total_item_count",
+        "o.order_channel",
+        "o.submitted_date"
+      ],
+      "filters": [
+        "o.submitted_date >= date_trunc('month', current_date())"
+      ],
+      "order_by": "o.grand_total DESC",
+      "limit": 5,
+      "value_label": "rep whose orders to list",
+      "example": "Ryan Tran",
+      "description": "ONE REP's biggest orders this month, largest first, each WITH THE CUSTOMER that placed it, how many items were on it, which channel it came through and the date. Use when a rep asks about their biggest or largest order, who it was from, or how their orders split across channels. Requires the rep's name. For their month as a whole -- totals, averages, pace -- use lookup_rep_month.",
+      "subject": "Orders",
+      "sample_questions": [
+        "What is my largest order and which customer?",
+        "Which of my orders came through the app?"
+      ],
+      "answer_example": "Your biggest was fifty nine thousand three hundred and thirty four dollars, from Asian Food Store in Appleton, four hundred and ninety seven items, through the PDA on the second."
+    },
+    {
+      "name": "lookup_rep_month_mix",
+      "table": "ust_databricks.ust_reporting.mart_rep_period_item_mix",
+      "lookup_column": "rep_name",
+      "match": "contains",
+      "columns": [
+        "invoice_lines",
+        "distinct_items",
+        "distinct_categories",
+        "promo_line_share",
+        "new_item_line_share",
+        "return_line_rate",
+        "as_of_date"
+      ],
+      "filters": [
+        "period_type = 'month'",
+        "is_current"
+      ],
+      "limit": 1,
+      "value_label": "rep whose mix to break down",
+      "example": "Ryan Tran",
+      "description": "What ONE REP's month was MADE OF: how many invoice lines and distinct items and categories, and the share of LINES that were promotional or new items, plus the rate at which lines came back. Shares here are by line, not by value -- too little of the invoice history carries a price for a value share to mean anything, so if someone asks for the split by value, say it is by line and that value coverage is too thin to divide up. These are invoiced lines, not orders submitted: for order counts, totals and pace use lookup_rep_month, and for individual orders use lookup_biggest_orders.",
+      "subject": "Orders",
+      "sample_questions": [
+        "What was my month made of?",
+        "How much of my month was promo or new items?"
+      ],
+      "answer_example": "Two thousand and ninety-eight lines across thirteen hundred items and ten categories. Promotions were about four percent of lines, new items about six."
     }
   ],
   "tbd": {
