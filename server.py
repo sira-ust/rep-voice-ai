@@ -267,7 +267,9 @@ try:
     KEEPALIVE_SECS = max(3.0, float(os.environ.get("LLM_PROXY_KEEPALIVE_SECS", "8") or 8))
 except ValueError:
     KEEPALIVE_SECS = 8.0
-KEEPALIVE_LINES = ("Still checking.", "Almost there.")
+# Enough to carry a slow turn past ~45 s. When these ran out, ElevenLabs gave
+# up, asked again, and the new request started the lookup from scratch.
+KEEPALIVE_LINES = ("Still checking.", "Almost there.", "Still working on it.", "Just a moment more.")
 
 
 def _flat(text: str) -> str:
@@ -667,12 +669,24 @@ def build_visual(spec: dict, history: list) -> tuple[dict | None, str]:
 ORS_URL = "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
 ROUTE_TTL = 24 * 3600
 ROUTE_MAX_POINTS = 300          # plenty to follow the road on a phone screen
+# The road is a nicety; the answer is not. A route that has not come back in
+# this long is abandoned for the straight line, and after a failure nobody
+# waits on the service again for ROUTE_BACKOFF. On the office server a trip
+# question with stores on it never answered: each attempt sat on the route
+# call past ElevenLabs' patience, it asked again, and the next attempt sat
+# there too. urlopen's own timeout does not cover the DNS lookup, which is
+# why the deadline is a thread's, not the socket's.
+ROUTE_DEADLINE = 4.0
+ROUTE_BACKOFF = 600
 _route_lock = threading.Lock()
 _route_cache: dict[tuple, dict] = {}
+_route_down_until = 0.0
 
 
 def road_route(from_lat, from_lon, to_lat, to_lon) -> dict | None:
-    """{"miles", "minutes", "path": [[lat, lon], ...]} by road, or None."""
+    """{"miles", "minutes", "path": [[lat, lon], ...]} by road, or None --
+    within ROUTE_DEADLINE seconds, whatever the network does."""
+    global _route_down_until
     key = os.environ.get("ORS_API_KEY", "").strip()
     try:
         a = (float(from_lat), float(from_lon))
@@ -686,7 +700,25 @@ def road_route(from_lat, from_lon, to_lat, to_lon) -> dict | None:
         hit = _route_cache.get(cache_key)
         if hit and hit["at"] > time.time() - ROUTE_TTL:
             return hit["route"]
+        if time.time() < _route_down_until:
+            return None
 
+    box: list = []
+    worker = threading.Thread(target=lambda: box.append(_fetch_route(key, a, b, cache_key)), daemon=True)
+    worker.start()
+    worker.join(ROUTE_DEADLINE)
+    if worker.is_alive() or not box or box[0] is None:
+        with _route_lock:
+            _route_down_until = time.time() + ROUTE_BACKOFF
+        sys.stderr.write("  ROUTE %s: straight line for the next %d min\n"
+                         % ("timed out after %.0fs" % ROUTE_DEADLINE if worker.is_alive() else "failed",
+                            ROUTE_BACKOFF // 60))
+        return None
+    return box[0]
+
+
+def _fetch_route(key: str, a: tuple, b: tuple, cache_key: tuple) -> dict | None:
+    """One OpenRouteService request; road_route puts the deadline on it."""
     body = json.dumps({"coordinates": [[a[1], a[0]], [b[1], b[0]]]}).encode("utf-8")
     req = urllib.request.Request(ORS_URL, data=body, method="POST", headers={
         "Authorization": key, "Content-Type": "application/json",
