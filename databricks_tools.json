@@ -243,58 +243,59 @@
     {
       "name": "lookup_accounts_in_city",
       "table": "ust_databricks.ust_reporting.mart_rep_account_status",
-      "from": "ust_databricks.ust_reporting.mart_rep_account_status a LEFT JOIN ust_databricks.ust_dims.dim_customers c ON c.customer_key = a.customer_key",
-      "lookup_column": "a.city",
-      "match": "contains",
-      "columns": [
-        "a.customer_name",
-        "c.address",
-        "a.city",
-        "a.county AS state",
-        "a.customer_key",
-        "a.delivery_days",
-        "a.appointment_required",
-        "a.invoice_days_12m",
-        "a.invoice_days_all_time",
-        "a.usual_gap_days",
-        "a.days_since_last_invoice_any_rep AS days_since_last_invoice",
-        "a.days_past_usual",
-        "a.rhythm_status",
-        "round(c.latitude, 4) AS latitude",
-        "round(c.longitude, 4) AS longitude"
-      ],
-      "filters": [
-        "a.customer_is_active",
-        "a.customer_name IS NOT NULL",
-        "a.is_owned_by_rep"
-      ],
-      "order_by": "a.rhythm_priority, a.days_past_usual DESC NULLS LAST, a.invoice_days_12m DESC",
-      "limit": 8,
-      "value_label": "city the rep is going to",
+      "value_label": "city or state the rep is going to",
       "example": "Indianapolis",
-      "description": "The rep's OWN accounts in ONE CITY they are going to, the ones most past their usual buying gap first, with delivery days and whether an appointment is needed. Use when a rep is in or working one city: 'I'm in Indianapolis Thursday'. If they are travelling there ('I'm heading to Madison') and have not said from where, ask where they are starting from and use lookup_accounts_on_route instead, unless they only want that city. Send just the city name. If they name a day, favour accounts whose delivery_days include it. Each row has the store's street address and state, and in_words -- answer from it, giving the street when suggesting a visit: how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days. Rhythm is per store across every rep's invoices: usual_gap_days is the median gap between invoice days over the last year, days_past_usual how many of those gaps it has now been.",
+      "description": "The rep's OWN accounts in ONE PLACE they are going to: a city ('Indianapolis', 'St. Louis' -- St, Ft and Mt are matched whatever the spelling), a city with its state ('Madison, WI' or 'Madison, Wisconsin') when the name is in several states, or a whole state ('Wisconsin' or 'WI'). Returns at most 8, the ones most past their usual buying gap first, with street address, delivery days and whether an appointment is needed. accounts_in_area is how many of the rep's accounts are in that place in all -- say it for a state ('you have 35 accounts in Wisconsin; the ones most due are...'). Use when a rep is in or working one place: 'I'm in Indianapolis Thursday'. If they are travelling there ('I'm heading to Madison') and have not said from where, ask where they are starting from and use lookup_accounts_on_route instead, unless they only want that place. No rows means the rep has no accounts there: say so plainly ('I don't see any of your accounts in Tennessee'). Each row has in_words -- answer from it: the street and town, how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days. Rhythm is per store across every rep's invoices.",
       "subject": "Trip planning",
       "sample_questions": [
-        "I'm in Indianapolis on Thursday, who should I see?"
+        "I'm in Indianapolis on Thursday, who should I see?",
+        "Who should I visit in Wisconsin?"
       ],
       "answer_example": "In Indianapolis, Pyone Cho is past its usual gap and takes Thursday deliveries.",
       "rep_column": "a.rep_name",
       "visual": {
         "type": "map",
-        "title": "Your accounts in the city"
-      }
+        "title": "Your accounts in the area"
+      },
+      "kind": "sql",
+      "sql": [
+        "WITH states AS (SELECT * FROM VALUES ('alabama', 'AL'), ('alaska', 'AK'), ('arizona', 'AZ'), ('arkansas', 'AR'), ('california', 'CA'), ('colorado', 'CO'), ('connecticut', 'CT'), ('delaware', 'DE'), ('district of columbia', 'DC'), ('florida', 'FL'), ('georgia', 'GA'), ('hawaii', 'HI'), ('idaho', 'ID'), ('illinois', 'IL'), ('indiana', 'IN'), ('iowa', 'IA'), ('kansas', 'KS'), ('kentucky', 'KY'), ('louisiana', 'LA'), ('maine', 'ME'), ('maryland', 'MD'), ('massachusetts', 'MA'), ('michigan', 'MI'), ('minnesota', 'MN'), ('mississippi', 'MS'), ('missouri', 'MO'), ('montana', 'MT'), ('nebraska', 'NE'), ('nevada', 'NV'), ('new hampshire', 'NH'), ('new jersey', 'NJ'), ('new mexico', 'NM'), ('new york', 'NY'), ('north carolina', 'NC'), ('north dakota', 'ND'), ('ohio', 'OH'), ('oklahoma', 'OK'), ('oregon', 'OR'), ('pennsylvania', 'PA'), ('rhode island', 'RI'), ('south carolina', 'SC'), ('south dakota', 'SD'), ('tennessee', 'TN'), ('texas', 'TX'), ('utah', 'UT'), ('vermont', 'VT'), ('virginia', 'VA'), ('washington', 'WA'), ('west virginia', 'WV'), ('wisconsin', 'WI'), ('wyoming', 'WY') AS s(name, code)),",
+        "raw AS (SELECT trim(:lookup_value) AS v),",
+        "want AS (SELECT trim(regexp_replace(regexp_replace(regexp_replace(concat(' ', regexp_replace(regexp_replace(lower(regexp_replace(r.v, ',.*$', '')), '[.,]', ' '), '\\\\s+', ' '), ' '), ' st ', ' saint '), ' ft ', ' fort '), ' mt ', ' mount ')) AS city_part, ts.code AS tail_state, ws.code AS whole_state",
+        "FROM raw r",
+        "LEFT JOIN states ts ON lower(trim(regexp_extract(r.v, ',\\\\s*(.+)$', 1))) IN (ts.name, lower(ts.code))",
+        "LEFT JOIN states ws ON lower(trim(regexp_replace(r.v, '[.]', ''))) IN (ws.name, lower(ws.code)))",
+        "SELECT a.customer_name, c.address, a.city, upper(trim(a.county)) AS state, a.customer_key, a.delivery_days,",
+        "a.appointment_required, a.invoice_days_12m, a.invoice_days_all_time, a.usual_gap_days,",
+        "a.days_since_last_invoice_any_rep AS days_since_last_invoice, a.days_past_usual, a.rhythm_status,",
+        "round(c.latitude, 4) AS latitude, round(c.longitude, 4) AS longitude,",
+        "count(*) OVER () AS accounts_in_area",
+        "FROM ust_databricks.ust_reporting.mart_rep_account_status a",
+        "LEFT JOIN ust_databricks.ust_dims.dim_customers c ON c.customer_key = a.customer_key",
+        "CROSS JOIN want w",
+        "WHERE a.customer_is_active AND a.customer_name IS NOT NULL AND a.is_owned_by_rep {rep_filter}",
+        "AND CASE WHEN w.whole_state IS NOT NULL THEN upper(trim(a.county)) = w.whole_state",
+        "ELSE trim(regexp_replace(regexp_replace(regexp_replace(concat(' ', regexp_replace(regexp_replace(lower(a.city), '[.,]', ' '), '\\\\s+', ' '), ' '), ' st ', ' saint '), ' ft ', ' fort '), ' mt ', ' mount ')) LIKE concat('%', w.city_part, '%')",
+        "AND (w.tail_state IS NULL OR upper(trim(a.county)) = w.tail_state) END",
+        "ORDER BY a.rhythm_priority, a.days_past_usual DESC NULLS LAST, a.invoice_days_12m DESC",
+        "LIMIT 8"
+      ]
     },
     {
       "name": "lookup_accounts_on_route",
       "kind": "sql",
       "table": "ust_databricks.ust_reporting.mart_rep_account_status",
       "sql": [
-        "WITH ends AS (SELECT trim(element_at(s.p, 1)) AS a_raw, trim(element_at(s.p, -1)) AS b_raw",
+        "WITH states AS (SELECT * FROM VALUES ('alabama', 'AL'), ('alaska', 'AK'), ('arizona', 'AZ'), ('arkansas', 'AR'), ('california', 'CA'), ('colorado', 'CO'), ('connecticut', 'CT'), ('delaware', 'DE'), ('district of columbia', 'DC'), ('florida', 'FL'), ('georgia', 'GA'), ('hawaii', 'HI'), ('idaho', 'ID'), ('illinois', 'IL'), ('indiana', 'IN'), ('iowa', 'IA'), ('kansas', 'KS'), ('kentucky', 'KY'), ('louisiana', 'LA'), ('maine', 'ME'), ('maryland', 'MD'), ('massachusetts', 'MA'), ('michigan', 'MI'), ('minnesota', 'MN'), ('mississippi', 'MS'), ('missouri', 'MO'), ('montana', 'MT'), ('nebraska', 'NE'), ('nevada', 'NV'), ('new hampshire', 'NH'), ('new jersey', 'NJ'), ('new mexico', 'NM'), ('new york', 'NY'), ('north carolina', 'NC'), ('north dakota', 'ND'), ('ohio', 'OH'), ('oklahoma', 'OK'), ('oregon', 'OR'), ('pennsylvania', 'PA'), ('rhode island', 'RI'), ('south carolina', 'SC'), ('south dakota', 'SD'), ('tennessee', 'TN'), ('texas', 'TX'), ('utah', 'UT'), ('vermont', 'VT'), ('virginia', 'VA'), ('washington', 'WA'), ('west virginia', 'WV'), ('wisconsin', 'WI'), ('wyoming', 'WY') AS s(name, code)),",
+        "ends0 AS (SELECT trim(element_at(s.p, 1)) AS a_raw, trim(element_at(s.p, -1)) AS b_raw",
         "FROM (SELECT split(trim(:lookup_value), '(?i)\\\\s+to\\\\s+') AS p) s),",
-        "places AS (SELECT lower(trim(city)) AS city, upper(trim(county)) AS state, avg(latitude) AS lat,",
+        "ends AS (SELECT e.a_raw, e.b_raw, sa.code AS a_state, sb.code AS b_state FROM ends0 e",
+        "LEFT JOIN states sa ON lower(trim(regexp_extract(e.a_raw, ',\\\\s*(.+)$', 1))) IN (sa.name, lower(sa.code))",
+        "LEFT JOIN states sb ON lower(trim(regexp_extract(e.b_raw, ',\\\\s*(.+)$', 1))) IN (sb.name, lower(sb.code))) ,",
+        "places AS (SELECT trim(regexp_replace(regexp_replace(regexp_replace(concat(' ', regexp_replace(regexp_replace(lower(city), '[.,]', ' '), '\\\\s+', ' '), ' '), ' st ', ' saint '), ' ft ', ' fort '), ' mt ', ' mount ')) AS city, upper(trim(county)) AS state, avg(latitude) AS lat,",
         "avg(longitude) AS lon, count(*) AS n FROM ust_databricks.ust_dims.dim_customers WHERE is_active AND has_coordinates GROUP BY 1, 2),",
-        "o AS (SELECT p.* FROM places p CROSS JOIN ends e WHERE p.city = lower(trim(regexp_replace(e.a_raw, ',.*$', ''))) AND (regexp_extract(e.a_raw, ',\\\\s*([A-Za-z]{2})\\\\s*$', 1) = '' OR p.state = upper(regexp_extract(e.a_raw, ',\\\\s*([A-Za-z]{2})\\\\s*$', 1)))),",
-        "d AS (SELECT p.* FROM places p CROSS JOIN ends e WHERE p.city = lower(trim(regexp_replace(e.b_raw, ',.*$', ''))) AND (regexp_extract(e.b_raw, ',\\\\s*([A-Za-z]{2})\\\\s*$', 1) = '' OR p.state = upper(regexp_extract(e.b_raw, ',\\\\s*([A-Za-z]{2})\\\\s*$', 1)))),",
+        "o AS (SELECT p.* FROM places p CROSS JOIN ends e WHERE p.city = trim(regexp_replace(regexp_replace(regexp_replace(concat(' ', regexp_replace(regexp_replace(lower(regexp_replace(e.a_raw, ',.*$', '')), '[.,]', ' '), '\\\\s+', ' '), ' '), ' st ', ' saint '), ' ft ', ' fort '), ' mt ', ' mount ')) AND (e.a_state IS NULL OR p.state = e.a_state)),",
+        "d AS (SELECT p.* FROM places p CROSS JOIN ends e WHERE p.city = trim(regexp_replace(regexp_replace(regexp_replace(concat(' ', regexp_replace(regexp_replace(lower(regexp_replace(e.b_raw, ',.*$', '')), '[.,]', ' '), '\\\\s+', ' '), ' '), ' st ', ' saint '), ' ft ', ' fort '), ' mt ', ' mount ')) AND (e.b_state IS NULL OR p.state = e.b_state)),",
         "trip AS (SELECT o.city AS o_city, o.state AS o_state, o.lat AS o_lat, o.lon AS o_lon,",
         "d.city AS d_city, d.state AS d_state, d.lat AS d_lat, d.lon AS d_lon FROM o CROSS JOIN d",
         "ORDER BY pow((d.lat - o.lat) * 69.0, 2) + pow((d.lon - o.lon) * 69.17 * cos(radians((o.lat + d.lat) / 2)), 2),",
@@ -328,7 +329,7 @@
       "rep_column": "a.rep_name",
       "value_label": "trip, as 'FROM CITY to TO CITY'",
       "example": "Milwaukee to Indianapolis",
-      "description": "The rep's OWN accounts ALONG A DRIVE between two cities: within 15 miles of the straight line from one to the other, from 15 miles out of the starting city to the destination, the ones past their usual buying gap first. Send the value as 'Milwaukee to Indianapolis'. If the rep says a state, add it as two letters after a comma: 'Milwaukee to Madison, AL'; without one, a city name found in several states is taken as the one nearest the other end. Each row says the trip it planned in from_place and to_place -- if that is not the trip the rep meant, say which places you used and ask. You do not know where the rep is: never guess the starting city. If they name only where they are going, ask 'Where will you be starting from?' before calling this -- or use lookup_accounts_in_city if they are already there or only want that city. How far each store is from the route is as the crow flies: say 'about N miles off the way'. The result may also have drive: the road miles and drive time for the whole trip, ready to say -- quote it as given, and never work out a drive time yourself. Each row: address, miles_from_start (driving order), miles_off_route, route_miles. Each row has in_words -- answer from it: the street and town, how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days. No rows usually means a city name was not recognised: ask them to repeat it.",
+      "description": "The rep's OWN accounts ALONG A DRIVE between two cities: within 15 miles of the straight line from one to the other, from 15 miles out of the starting city to the destination, the ones past their usual buying gap first. Send the value as 'Milwaukee to Indianapolis'. If the rep says a state, add it after a comma: 'Milwaukee to Madison, AL' or 'Milwaukee to Madison, Alabama'; St, Ft and Mt are matched whatever the spelling ('St. Louis to Chicago'); without one, a city name found in several states is taken as the one nearest the other end. Each row says the trip it planned in from_place and to_place -- if that is not the trip the rep meant, say which places you used and ask. You do not know where the rep is: never guess the starting city. If they name only where they are going, ask 'Where will you be starting from?' before calling this -- or use lookup_accounts_in_city if they are already there or only want that city. How far each store is from the route is as the crow flies: say 'about N miles off the way'. The result may also have drive: the road miles and drive time for the whole trip, ready to say -- quote it as given, and never work out a drive time yourself. Each row: address, miles_from_start (driving order), miles_off_route, route_miles. Each row has in_words -- answer from it: the street and town, how often the store usually buys, how long it has been, how many times its usual gap that is, and delivery days. No rows usually means a city name was not recognised: ask them to repeat it.",
       "subject": "Trip planning",
       "sample_questions": [
         "I'm driving from Milwaukee to Indianapolis, who can I stop at?"

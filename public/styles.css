@@ -624,34 +624,6 @@ input[type="range"]::-moz-range-thumb {
   text-align: center;
 }
 
-.composer {
-  display: flex;
-  gap: 8px;
-  padding: 11px;
-  border-top: 1px solid var(--line);
-  background: var(--surface-2);
-}
-
-.composer input {
-  flex: 1;
-  min-width: 0;
-  font: inherit;
-  font-size: 13.5px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  color: var(--text);
-  border-radius: var(--r-sm);
-  padding: 9px 11px;
-}
-
-.composer input:focus {
-  outline: none;
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
-
-.composer input:disabled { opacity: 0.45; }
-
 /* ---------- debug event log ---------- */
 /* Per the user's choice, the debug panel no longer uses a dark "terminal"
    look — it's unified with the light-card style used everywhere else. */
@@ -663,6 +635,9 @@ input[type="range"]::-moz-range-thumb {
   overflow: hidden;
   flex: none;
 }
+
+/* Inside the settings card: keep the border that groups it, drop the fill. */
+.settings .debug { background: transparent; }
 
 .debug-head {
   display: flex;
@@ -759,9 +734,9 @@ input[type="range"]::-moz-range-thumb {
 .debug-log .cb  { color: var(--warn-text); }
 .debug-log .err { color: #B23A30; }
 
-/* ---------- narrow screens ---------- */
+/* ---------- compact (the app is CT70-sized everywhere; see "PDA view") ---------- */
 
-@media (max-width: 520px) {
+@media all {
   .app { padding: 12px 12px 18px; gap: 12px; }
   .settings-grid { grid-template-columns: 1fr; }
   .stage { padding: 20px 14px 16px; }
@@ -773,7 +748,7 @@ input[type="range"]::-moz-range-thumb {
 /* ---------- what-you-can-ask guide ---------- */
 
 .guide {
-  margin: auto 0;
+  margin: 0 0 auto;      /* under the topic bar, not floating mid-chat */
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -858,26 +833,20 @@ input[type="range"]::-moz-range-thumb {
   align-items: flex-start;
 }
 
-/* A question is a button: clicking one drops it into the composer, so a new
-   user can try the agent without inventing a phrasing. */
+/* An example of something to say. Not a button: the app is voice only. */
 .guide-ask {
   font: inherit;
-  font-size: 13.5px;
+  font-size: 12px;
   font-weight: 600;
   text-align: left;
   color: var(--text);
   background: var(--surface-2);
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 6px 13px;
-  cursor: pointer;
-  transition: border-color .15s, background .15s, color .15s;
+  padding: 4px 10px;
+  display: inline-block;
 }
 
-.guide-ask:hover {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
 
 /* An example question in its topic's colour. */
 .guide-ask[class*="topic-"] {
@@ -886,11 +855,6 @@ input[type="range"]::-moz-range-thumb {
   border-left: 4px solid var(--tc-fg);
 }
 
-.guide-ask[class*="topic-"]:hover {
-  background: var(--tc-bg);
-  border-color: var(--tc-fg);
-  border-left-color: var(--tc-fg);
-}
 
 .guide-ask::before {
   content: "\201c";
@@ -1028,7 +992,7 @@ input[type="range"]::-moz-range-thumb {
 .vmap-popup strong { display: block; color: var(--pda-navy); margin-bottom: 2px; }
 .vmap-end { font-weight: 650; color: var(--pda-navy); }
 
-@media (max-width: 520px) {
+@media all {
   .vmap { height: 240px; }
   .vpie-chart { width: 112px; height: 112px; }
 }
@@ -1046,7 +1010,7 @@ input[type="range"]::-moz-range-thumb {
 .topic-bar-head { display: flex; align-items: center; gap: 10px; }
 .topic-bar-head .guide-subject { white-space: nowrap; flex: none; }
 .topic-bar-topics { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
-.topic-bar .guide-topic { font-size: 12.5px; padding: 4px 11px; white-space: nowrap; flex: none; }
+.topic-bar .guide-topic { font-size: 11.5px; padding: 3px 9px; white-space: nowrap; flex: none; }
 .topic-bar-panel {
   display: flex;
   flex-wrap: wrap;
@@ -1055,21 +1019,110 @@ input[type="range"]::-moz-range-thumb {
   overflow-y: auto;
 }
 .topic-bar-panel[hidden] { display: none; }
-.topic-bar-panel .guide-ask { font-size: 13px; padding: 5px 12px; }
+.topic-bar-panel .guide-ask { font-size: 12px; padding: 4px 10px; }
 .topic-bar-panel .guide-limit { flex-basis: 100%; margin: 2px 0 0; }
 
-/* Phones: the label goes above, and the bubbles scroll sideways in one row
-   instead of taking three lines of the chat; the fade says there are more. */
-@media (max-width: 520px) {
+/* At CT70 width the label goes above, and the bubbles are small enough that
+   all seven fit in two rows -- every topic in view, none hidden off the edge. */
+@media all {
   .topic-bar { padding: 8px 10px; }
   .topic-bar-head { flex-direction: column; align-items: stretch; gap: 6px; }
-  .topic-bar-topics {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
-    -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent);
-    mask-image: linear-gradient(90deg, #000 85%, transparent);
-    padding-right: 24px;
+  .topic-bar-topics { flex-wrap: wrap; gap: 5px; }
+}
+
+/* ---------- PDA view: Honeywell CT70 and phones ----------
+   The CT70 is 1080 x 2280 at 6", which Android scales by 2.625: a page sees a
+   411 x 869 portrait screen, about 411 x 790 under Chrome's bars. Laid out
+   like the desktop, the orb and controls took half of that and the answers
+   started below the fold. Here the app fills the screen exactly, the chat
+   takes most of it, scrolling inside itself, and the controls sit in a compact
+   card at the bottom, in thumb reach -- one row once a call is live. Touch targets are 44-48px for use
+   on the move; volume is left to the device's own keys, and the event log is
+   inside settings, behind the gear.
+
+   This is the only layout: a desktop browser shows the same CT70-sized app,
+   framed in the middle of the window, so what you test is what reps see. */
+
+@media all {
+  html, body { height: 100%; overflow: hidden; }
+  .app {
+    height: 100vh;
+    height: 100dvh;
+    min-height: 0;
+    padding: 8px;
+    gap: 8px;
   }
-  .topic-bar-topics::-webkit-scrollbar { display: none; }
+  .topbar { flex: none; }
+  .brand-mark { width: 24px; height: 24px; border-radius: 8px; }
+  .brand-name { font-size: 14px; }
+  .status-pill { padding: 4px 10px 4px 8px; font-size: 12px; }
+  .topbar .icon-btn { width: 40px; height: 40px; }
+
+  .stage {
+    flex: none;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas:
+      "orb  label label"
+      "rep  rep   rep"
+      "call call  ctrl";
+    align-items: center;
+    gap: 8px 10px;
+    padding: 10px 12px;
+    border-radius: var(--r-lg);
+  }
+  /* The orb at half size: same animation, a 58px footprint. */
+  .orb { grid-area: orb; transform: scale(0.5); margin: -29px; }
+  .mode-label { grid-area: label; text-align: left; font-size: 13.5px; min-height: 0; }
+  #repField { grid-area: rep; }
+  #repField select { min-height: 44px; font-size: 15px; }
+  #callBtn { grid-area: call; width: 100%; min-height: 48px; padding: 10px 16px; }
+  .controls { grid-area: ctrl; width: auto; padding: 0; gap: 0; }
+  .controls .gauge { display: none; }
+  #muteBtn { width: 48px; height: 48px; border-radius: 999px; }
+
+  /* In a call: who you are is locked anyway, so the picker gives its space
+     to the answers -- the card is down to one row of status and two buttons. */
+  body[data-call="live"] #repField,
+  body[data-call="busy"] #repField { display: none; }
+  body[data-call="live"] .stage,
+  body[data-call="busy"] .stage {
+    grid-template-columns: auto 1fr auto auto;
+    grid-template-areas: "orb label call ctrl";
+  }
+  body[data-call="live"] #callBtn,
+  body[data-call="busy"] #callBtn { width: auto; padding: 10px 14px; font-size: 13.5px; }
+  body[data-call="live"] #callBtn .mic-icon,
+  body[data-call="busy"] #callBtn .mic-icon { display: none; }
+
+  .transcript-section { flex: 1; min-height: 0; border-radius: var(--r-lg); }
+  .transcript { padding: 10px; }
+  .msg { max-width: 92%; font-size: 14.5px; }
+  .topic-bar .guide-topic { min-height: 30px; }
+  .vmap { height: 220px; }
+  /* Settings carries the event log, so it can outgrow the screen: it scrolls
+     inside itself and stops well short of full height, so the call controls
+     under the chat stay reachable while it is open. */
+  .settings { max-height: 58dvh; overflow-y: auto; flex: none; }
+  .debug-log { max-height: 180px; }
+  .debug-head { flex-wrap: wrap; }
+}
+
+/* ---------- on a desktop: the CT70 screen, framed ----------
+   411 wide and at most 869 tall, the CT70's whole screen, centred. Wider
+   than the device itself can be, so this never applies on one. */
+
+@media (min-width: 481px) {
+  body { display: grid; place-items: center; }
+  .app {
+    width: 411px;
+    max-width: 411px;
+    height: min(100dvh - 32px, 869px);
+    margin: 16px auto;
+    border-radius: 26px;
+    background: var(--bg);
+    border: 1px solid var(--line-bright);
+    box-shadow: 0 18px 44px -18px rgba(26, 42, 58, 0.35);
+    overflow: hidden;
+  }
 }

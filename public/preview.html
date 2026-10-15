@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Layout preview</title>
+  <!-- The live app, twice: in a desktop browser window, and at the size a
+       Honeywell CT70 gives a web page. Both frames are the real thing --
+       sign-in, the rep picker and calls all work in either. -->
+  <style>
+    :root {
+      --bg: #F4F7FB; --ink: #1A2A3A; --muted: #8A97A6; --line: #E3E9F0; --navy: #3366AD;
+      --font: "Nunito", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font); }
+    header { padding: 18px 24px 4px; }
+    h1 { margin: 0; font-size: 18px; }
+    header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; max-width: 80ch; }
+    .views { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; padding: 18px 24px 32px; }
+    figure { margin: 0; }
+    figcaption { font-size: 13px; font-weight: 700; color: var(--navy); margin-bottom: 8px; }
+    figcaption span { display: block; font-weight: 500; color: var(--muted); font-size: 12px; }
+
+    /* Browser: a 1280 x 800 window drawn at 60%. */
+    .browser { width: 768px; border: 1px solid #C7D3E3; border-radius: 10px; overflow: hidden; background: #fff;
+               box-shadow: 0 10px 30px -12px rgba(26, 42, 58, .25); }
+    .browser-bar { height: 30px; background: #E4E9EF; display: flex; align-items: center; gap: 6px; padding: 0 10px; }
+    .browser-bar i { width: 10px; height: 10px; border-radius: 50%; background: #C7D3E3; }
+    .browser-bar b { margin-left: 10px; flex: 1; height: 18px; border-radius: 9px; background: #fff;
+                     font: 500 11px/18px var(--font); color: var(--muted); padding-left: 10px; }
+    .browser-screen { width: 768px; height: 480px; overflow: hidden; }
+    .browser-screen iframe { width: 1280px; height: 800px; border: 0; transform: scale(.6); transform-origin: 0 0; }
+
+    /* CT70: 411 x 869 CSS px portrait (1080 x 2280 at 2.625x). Android's
+       status bar (24) and navigation buttons (48), and Chrome's address bar
+       (56), leave the page 411 x 741. Drawn at full size. */
+    .device { width: 443px; padding: 16px; border-radius: 34px; background: #2B2F36;
+              box-shadow: 0 14px 34px -12px rgba(0, 0, 0, .45); }
+    .device-screen { width: 411px; background: #000; border-radius: 6px; overflow: hidden; }
+    .android-status { height: 24px; background: #1F2329; color: #E4E9EF; font: 600 11px/24px var(--font);
+                      padding: 0 12px; display: flex; justify-content: space-between; }
+    .chrome-bar { height: 56px; background: #fff; border-bottom: 1px solid var(--line); display: flex;
+                  align-items: center; padding: 0 12px; }
+    .chrome-bar b { flex: 1; height: 34px; border-radius: 17px; background: #EDF0F3;
+                    font: 500 13px/34px var(--font); color: var(--muted); padding-left: 14px; }
+    .device-screen iframe { display: block; width: 411px; height: 741px; border: 0; background: #fff; }
+    .android-nav { height: 48px; background: #1F2329; display: flex; justify-content: space-around; align-items: center; }
+    .android-nav i { width: 14px; height: 14px; border: 2px solid #8A97A6; }
+    .android-nav i:nth-child(1) { border-radius: 2px; transform: rotate(45deg) scale(.8); border-width: 0 0 2px 2px; }
+    .android-nav i:nth-child(2) { border-radius: 50%; }
+    .android-nav i:nth-child(3) { border-radius: 2px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Rep Voice AI: browser and PDA views</h1>
+    <p>Both are the live app. It is laid out for the CT70 everywhere: on the device it fills the
+       screen, and in a desktop browser it is framed at the CT70's size.</p>
+  </header>
+
+  <div class="views">
+    <figure>
+      <figcaption>Browser<span>1280 × 800 window, shown at 60%</span></figcaption>
+      <div class="browser">
+        <div class="browser-bar"><i></i><i></i><i></i><b>voice.qskyabc.com</b></div>
+        <div class="browser-screen">
+          <iframe src="/" title="Browser view" allow="microphone; autoplay"></iframe>
+        </div>
+      </div>
+    </figure>
+
+    <figure>
+      <figcaption>Honeywell CT70<span>6.0" · 1080 × 2280 · page area 411 × 741 in Chrome, actual size</span></figcaption>
+      <div class="device">
+        <div class="device-screen">
+          <div class="android-status"><span>9:41</span><span>LTE ▮▮▮</span></div>
+          <div class="chrome-bar"><b>voice.qskyabc.com</b></div>
+          <iframe src="/" title="CT70 view" allow="microphone; autoplay"></iframe>
+          <div class="android-nav"><i></i><i></i><i></i></div>
+        </div>
+      </div>
+    </figure>
+  </div>
+</body>
+</html>

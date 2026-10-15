@@ -1226,12 +1226,21 @@ def unsaid_start(name: str, value: str, history: list) -> bool:
     if name != "lookup_accounts_on_route":
         return False
     ends = re.split(r"(?i)\s+to\s+", value.strip())
-    start = re.sub(r",.*$", "", ends[0]).strip().lower()
-    if len(ends) < 2 or not start:
+    start = _place_words(re.sub(r",.*$", "", ends[0]))
+    if len(ends) < 2 or not start.strip():
         return True
-    said = " ".join(m.get("content") or "" for m in history
-                    if m.get("role") == "user" and isinstance(m.get("content"), str)).lower()
+    said = _place_words(" ".join(m.get("content") or "" for m in history
+                                 if m.get("role") == "user" and isinstance(m.get("content"), str)))
     return start not in said
+
+
+def _place_words(text: str) -> str:
+    """Place names compared as words, St/Ft/Mt spelled out -- the rep says
+    "St. Louis", the model may write "Saint Louis", and both are the same place."""
+    words = " " + " ".join(re.sub(r"[.,]", " ", (text or "").lower()).split()) + " "
+    for short, full in ((" st ", " saint "), (" ft ", " fort "), (" mt ", " mount ")):
+        words = words.replace(short, full)
+    return words
 
 
 def _tool_loop(history: list, model: str, max_tokens: int, rep: str, before_lookup) -> str:
@@ -1403,7 +1412,9 @@ CSP_POLICY = (
     "media-src 'self' blob: mediastream:; "
     "connect-src 'self' https://cdn.jsdelivr.net https://api.elevenlabs.io "
     "wss://api.elevenlabs.io https://*.elevenlabs.io wss://*.elevenlabs.io; "
-    "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    # 'self', not 'none': /preview.html frames the app at browser and PDA
+    # size. Other sites still cannot frame it.
+    "frame-ancestors 'self'; base-uri 'none'; form-action 'self'"
 )
 
 
@@ -1490,7 +1501,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Permissions-Policy", "microphone=(self), camera=(), geolocation=()")
         if CSP:
@@ -1560,6 +1571,13 @@ class Handler(BaseHTTPRequestHandler):
         if not self._user():
             if route.startswith("/api"):
                 self._json(401, {"error": "Not signed in.", "login": "/login"})
+            elif _RETURN_PAGE.match(route):
+                # Opening /preview.html signed out used to land on the main
+                # page after sign-in, which looks like the preview not working.
+                self._redirect("/login", [(
+                    "Set-Cookie",
+                    "%s=%s; Path=/; Max-Age=600; HttpOnly; SameSite=Strict"
+                    % (AFTER_LOGIN_COOKIE, route.lstrip("/")))])
             else:
                 self._redirect("/login")
             return
@@ -1626,7 +1644,16 @@ class Handler(BaseHTTPRequestHandler):
         cookie = "%s=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Strict%s" % (
             auth.SESSION_COOKIE, auth.issue_session(username),
             auth.session_lifetime(), "" if INSECURE_COOKIE else "; Secure")
-        self._redirect("/", [("Set-Cookie", cookie)])
+        # Back to the page that sent them here, if it was one of ours.
+        jar = http.cookies.SimpleCookie()
+        try:
+            jar.load(self.headers.get("Cookie") or "")
+        except http.cookies.CookieError:
+            pass
+        wanted = "/" + (jar[AFTER_LOGIN_COOKIE].value if AFTER_LOGIN_COOKIE in jar else "")
+        target = wanted if _RETURN_PAGE.match(wanted) else "/"
+        self._redirect(target, [("Set-Cookie", cookie), (
+            "Set-Cookie", "%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict" % AFTER_LOGIN_COOKIE)])
 
     def _stream_live(self, call: str) -> None:
         """Server-sent events for one call: the rep's words as the proxy gets them.
@@ -2043,6 +2070,12 @@ class Handler(BaseHTTPRequestHandler):
         if ctype.startswith("text/") or ctype in ("application/javascript", "application/json"):
             ctype += "; charset=utf-8"
         self._send(200, target.read_bytes(), ctype)
+
+
+# Where sign-in returns to: one of our own pages, by name, and nothing else --
+# a free-form "next" is how a login page becomes an open redirect.
+AFTER_LOGIN_COOKIE = "after_login"
+_RETURN_PAGE = re.compile(r"^/[A-Za-z0-9_-]+\.html$")
 
 
 class QuietServer(ThreadingHTTPServer):

@@ -39,9 +39,6 @@ const el = {
   topicBarTopics: $("topicBarTopics"),
   topicBarPanel: $("topicBarPanel"),
   guideFoot: $("guideFoot"),
-  composer: $("composer"),
-  composerInput: $("composerInput"),
-  composerSend: $("composerSend"),
   debugToggle: $("debugToggle"),
   debugLog: $("debugLog"),
   debugCount: $("debugCount"),
@@ -245,14 +242,18 @@ function render() {
 
   const live = status === "connected";
   const busy = status === "connecting" || status === "disconnecting";
+  // For the layout: on a PDA the controls shrink to one row once a call is
+  // under way, so the answers get the screen (styles.css, "PDA view").
+  document.body.dataset.call = live ? "live" : busy ? "busy" : "idle";
   el.callBtn.classList.toggle("is-live", live);
   el.callBtn.disabled = busy;
   // Locked for the duration of a call. The agent is told who it is speaking to
   // once, at the start, so changing it mid-conversation would leave the picker
   // and every answer disagreeing about whose accounts these are.
   if (el.repSelect) el.repSelect.disabled = live || busy;
+  // The live controls are one row at CT70 width, which "End conversation" overfills.
   el.callBtnLabel.textContent = live
-    ? "End conversation"
+    ? "End call"
     : busy
       ? STATUS_LABEL[status]
       : "Start conversation";
@@ -282,8 +283,6 @@ function render() {
   el.muteBtn.disabled = !live;
   el.muteBtn.classList.toggle("active", state.muted);
   el.muteBtn.title = state.muted ? "Unmute microphone" : "Mute microphone";
-  el.composerInput.disabled = !live;
-  el.composerSend.disabled = !live;
   el.agentSelect.disabled = live;
   el.agentIdInput.disabled = live;
   el.connSelect.disabled = live;
@@ -783,16 +782,6 @@ el.agentSelect.addEventListener("change", () => {
 
 el.agentIdInput.addEventListener("change", refreshAgentInfo);
 
-el.composer.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const text = el.composerInput.value.trim();
-  if (!text || !state.conversation) return;
-  logDetailed("out", "sendUserMessage", text);
-  state.conversation.sendUserMessage(text);
-  addMessage(text, "user");
-  el.composerInput.value = "";
-});
-
 el.debugToggle.addEventListener("click", () => {
   const open = el.debugLog.hidden;
   el.debugLog.hidden = !open;
@@ -910,41 +899,26 @@ async function loadGuide() {
   if (!groups.length || !el.guideGroups) return;
 
   el.guideGroups.innerHTML = "";
-  const tables = [];
-  for (const group of groups) {
-    for (const table of group.tables || []) {
-      if (!tables.includes(table.name)) tables.push(table.name);
-    }
-  }
 
   const TOPIC_COLOURS = 7;      // .topic-0 to .topic-6 in styles.css
 
-  // An example question as a button. Clicking loads it into the composer
-  // rather than sending, so the user can edit it and can see where their
-  // words go.
-  const askButton = (question, i, after) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = `guide-ask topic-${i % TOPIC_COLOURS}`;
-    btn.textContent = question;
-    btn.addEventListener("click", () => {
-      el.composerInput.value = question;
-      if (!el.composerInput.disabled) el.composerInput.focus();
-      else el.modeLabel.textContent = "Start the conversation, then send it";
-      if (after) after();
-    });
-    return btn;
+  // An example question, in its topic's colour. Something to say, not to
+  // tap: the app is voice only, so there is nowhere to send it to.
+  const askExample = (question, i) => {
+    const chip = document.createElement("span");
+    chip.className = `guide-ask topic-${i % TOPIC_COLOURS}`;
+    chip.textContent = question;
+    return chip;
   };
 
   // The topics, pinned above the chat. The guide inside the chat goes with
   // the first message, and a rep mid-call still needs to know what they can
   // ask -- so the areas stay in view the whole time, as coloured bubbles.
-  // Picking one opens its example questions under the bar; picking it again,
-  // or picking a question, closes them.
+  // Picking one opens its example questions under the bar; picking it again
+  // closes them.
   if (el.topicBar && el.topicBarTopics && el.topicBarPanel) {
     let picked = null;
     el.topicBarTopics.innerHTML = "";
-    const close = () => { picked = null; showPanel(); };
     const showPanel = () => {
       const panel = el.topicBarPanel;
       panel.innerHTML = "";
@@ -956,16 +930,7 @@ async function loadGuide() {
       if (picked === null) return;
       const group = groups[picked];
       for (const question of (group.questions || []).slice(0, 6)) {
-        panel.appendChild(askButton(question, picked, close));
-      }
-      // What an answer sounds like. Spoken answers are a sentence or two, and
-      // someone expecting a table reads that as the lookup having failed.
-      const example = (group.answers || [])[0];
-      if (example) {
-        const reply = document.createElement("p");
-        reply.className = "guide-limit";
-        reply.textContent = "Answers like: “" + example + "”";
-        panel.appendChild(reply);
+        panel.appendChild(askExample(question, picked));
       }
     };
     groups.forEach((group, i) => {
@@ -1003,16 +968,9 @@ async function loadGuide() {
   asks.className = "guide-asks";
   groups.forEach((group, i) => {
     const question = (group.questions || [])[0];
-    if (question) asks.appendChild(askButton(question, i));
+    if (question) asks.appendChild(askExample(question, i));
   });
   asking.appendChild(asks);
-  const example = groups.map((g) => (g.answers || [])[0]).find(Boolean);
-  if (example) {
-    const reply = document.createElement("p");
-    reply.className = "guide-limit";
-    reply.textContent = "Answers like: “" + example + "”";
-    asking.appendChild(reply);
-  }
   el.guideGroups.appendChild(asking);
 
   // Questions the PDF asks for that nothing can answer yet. Better read here
@@ -1036,23 +994,7 @@ async function loadGuide() {
       list.appendChild(li);
     }
     block.appendChild(list);
-
-    const waiting = [...new Set(tbd.map((t) => t.waitingOn).filter(Boolean))];
-    if (waiting.length) {
-      const note = document.createElement("p");
-      note.className = "guide-limit";
-      note.textContent = "Waiting on " + waiting.join(", ") + ".";
-      block.appendChild(note);
-    }
     el.guideGroups.appendChild(block);
-  }
-
-  if (el.guideFoot) {
-    // The gaps worth knowing before you ask, in one line rather than one per
-    // topic. Everything else about a topic is on its tooltip.
-    el.guideFoot.textContent =
-      `Read live from ${tables.length} table${tables.length === 1 ? "" : "s"} ` +
-      "each time you ask, never from memory.";
   }
 }
 
