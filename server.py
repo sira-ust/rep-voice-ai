@@ -123,6 +123,57 @@ def warm_warehouse(reason: str) -> None:
     threading.Thread(target=run, daemon=True, name="dbx-warm").start()
 
 
+# The page waits for this before it lets a call start, so a rep's first
+# question is not the one that sits through a cold warehouse. A query that
+# answered in the last READY_FOR seconds counts as proof it is awake.
+READY_FOR = 5 * 60
+_ready_at = 0.0
+_ready_lock = threading.Lock()
+
+
+def mark_warehouse_ready() -> None:
+    global _ready_at
+    with _ready_lock:
+        _ready_at = time.time()
+
+
+def wait_for_warehouse(timeout: int = 50) -> tuple[bool, str]:
+    """Block until the warehouse answers SELECT 1, or `timeout` seconds pass.
+
+    Unlike warm_warehouse, which only nudges, this waits: wait_timeout makes
+    Databricks hold the request until the statement finishes, which on a cold
+    warehouse is the start-up time itself.
+    """
+    if not WARM_READY:
+        return True, "no warehouse configured"
+    with _ready_lock:
+        if time.time() - _ready_at < READY_FOR:
+            return True, "recently answered"
+    body = json.dumps({
+        "warehouse_id": DBX_WAREHOUSE,
+        "statement": "SELECT 1",
+        "wait_timeout": "%ds" % max(5, min(50, timeout)),
+        "on_wait_timeout": "CONTINUE",
+        "disposition": "INLINE",
+        "format": "JSON_ARRAY",
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        DBX_HOST + "/api/2.0/sql/statements/", data=body, method="POST",
+        headers={"Authorization": "Bearer " + DBX_WARM_TOKEN,
+                 "Content-Type": "application/json",
+                 "User-Agent": "Mozilla/5.0 (compatible) elevenlabs-webui/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout + 10) as resp:
+            state = ((json.loads(resp.read().decode("utf-8") or "{}").get("status") or {})
+                     .get("state"))
+    except Exception as exc:  # noqa: BLE001 - the page decides what to do
+        return False, str(exc)
+    if state == "SUCCEEDED":
+        mark_warehouse_ready()
+        return True, "awake"
+    return False, "warehouse still starting (%s)" % state
+
+
 # ---- LLM proxy: the only place Databricks is ever reached from a live call --
 # ElevenLabs POSTs here (CUSTOM_LLM_URL) instead of straight to the real
 # Gemma/vLLM host. We run the model, execute any tool call it asks for
@@ -275,6 +326,17 @@ def live_is_current(call: str, seq: int) -> bool:
         return not entry or entry["seq"] == seq
 
 
+def live_publish_visual(call: str, visual: dict, seq: int = 0) -> None:
+    """A chart, table or map for the page, under the reply it belongs to."""
+    if not call or not visual:
+        return
+    with _live_lock:
+        entry = _live_calls.get(call)
+        if entry and (not seq or entry["seq"] == seq):
+            entry["events"].append({"type": "visual", "visual": visual})
+            _live_lock.notify_all()
+
+
 def live_publish_reply(call: str, text: str, start: bool, seq: int = 0) -> None:
     """A piece of the proxy's own reply, the moment it goes to ElevenLabs.
 
@@ -320,7 +382,8 @@ from the same text separately, so write it to be read:
 - *Italics* for a caveat or a hedge, such as *as of Sep 22*.
 - ==Highlight== the one thing the rep must not miss, at most once per reply.
 - Three or more items: a short list, one per line, each starting with "- ".
-- Nothing else: no headings, tables, links, code or emoji.
+- Nothing else: no headings, tables, links, code or emoji -- apart from the
+  visual block below.
 
 Keep it as short as you would say it. The formatting helps the eye; it is not
 a reason to write more.
@@ -336,6 +399,50 @@ are what you said, not what the data says.
   reuse one store's items, numbers or status for another.
 - When the rep says yes to something you offered to look up, look it up.
 - If there is no result for what they asked, say you will check, and check.
+
+## Showing a picture on the rep's screen
+
+Under your reply the screen can show one chart, table or map, built from a
+lookup's rows.
+
+Most lookup results come with show_on_screen: a ready block for those rows.
+After your reply, copy it exactly as given -- unless the answer is a single
+number or a question back to the rep, or a different picture below fits what
+they asked better. With lookups from more than one tool, use the block of the
+one your answer is mostly about.
+
+To write your own, pick the kind that fits:
+
+- map: where accounts are -- rows from lookup_accounts_in_city,
+  lookup_accounts_on_route, lookup_accounts_to_call or lookup_winback_accounts.
+  Always for a trip.
+- bar: comparing an amount across a few rows (biggest orders, how far past
+  their usual gap), or across a few columns of one row.
+- pie: only for parts that together make one whole. Never for shares that
+  overlap or do not add up -- promo, new and returned lines are separate
+  rates, so they are a bar.
+- line: one amount over dates.
+- table: more than three rows the rep will want to scan, such as a pitch list
+  or top items.
+
+None for a single number, a yes or no, or a question back to the rep.
+
+Write it after your reply, on lines of its own, exactly in this form:
+
+```visual
+{"type": "bar", "from": "lookup_biggest_orders", "title": "Biggest orders this month", "label": "customer_name", "values": ["grand_total"]}
+```
+
+- "from": the lookup whose rows to draw, one already run in this conversation.
+- "label", "values" and "columns" are column names exactly as they appear in
+  those rows. Never write numbers or names yourself: the screen fills them in
+  from the lookup, so the picture always matches the data.
+- "where" (optional) keeps only rows where a column has a value:
+  {"period_type": "month"}.
+- table: "columns", at most 6. map: nothing beyond "from" and "title".
+
+The block is not spoken. Never read it out or describe it; you may say
+"I've put them on a map" or "they're on your screen".
 """
 
 
@@ -385,6 +492,302 @@ def speakable(text: str) -> str:
             line += "."
         lines.append(line)
     return " ".join(lines)
+
+
+# ------------------------------------------------------------------ visuals
+#
+# The model chooses a picture -- which lookup, which columns, what kind -- and
+# writes it as a small block after its reply. It never writes the figures: the
+# values come from the lookup's own rows, here. A chart is read as the data
+# itself, so a miscopied digit in one would be believed more than one in a
+# sentence, and miscopied digits are this model's best-known failure.
+#
+# The block is taken out before anything is spoken or shown as text. One that
+# cannot be built is dropped and logged; the spoken answer never depends on it.
+
+VISUAL_TYPES = ("bar", "pie", "line", "table", "map")
+VISUAL_MAX_ROWS = {"bar": 12, "pie": 8, "line": 31, "table": 25, "map": 25}
+_VISUAL_FENCE = re.compile(r"```[ \t]*(\w*)[ \t]*\n?(.*?)```", re.S)
+_VISUAL_BARE = re.compile(r'^[ \t]*\{[ \t]*"type"[ \t]*:.*\}[ \t]*$', re.M)
+# Columns the screen has no use for as values or table cells.
+_VISUAL_SKIP = {"in_words", "latitude", "longitude", "from_lat", "from_lon", "to_lat", "to_lon",
+                "customer_key", "item_no", "owner_rep_name", "rep_name"}
+
+
+def column_format(name: str) -> str:
+    """How a column's numbers read: money, a percentage, a multiple, or plain."""
+    n = name.lower()
+    if "pct" in n or "share" in n or n.endswith("_rate"):
+        return "percent"         # stored as fractions: 0.152 is 15.2%
+    if n == "days_past_usual":
+        return "times"
+    if any(w in n for w in ("sales", "amount", "value", "total", "target", "profit",
+                            "price", "needed", "projected", "revenue")) and "count" not in n:
+        return "money"
+    return "number"
+
+
+def _visual_rows(history: list, source: str, needs: list) -> tuple[str, list]:
+    """The newest rows from lookup `source` -- or, if the model named it
+    wrongly, from the newest lookup that has every column it asked for."""
+    names = {}
+    for message in history:
+        for call in message.get("tool_calls") or []:
+            names[call.get("id")] = (call.get("function") or {}).get("name") or ""
+    fallback = ("", [])
+    for message in reversed(history):
+        if message.get("role") != "tool":
+            continue
+        try:
+            rows = json.loads(message.get("content") or "{}").get("rows") or []
+        except (ValueError, AttributeError):
+            continue
+        if not rows:
+            continue
+        name = names.get(message.get("tool_call_id"), "")
+        if name == source:
+            return name, rows
+        if not fallback[1] and all(col in rows[0] for col in needs):
+            fallback = (name, rows)
+    return fallback
+
+
+def _title_case(value) -> str:
+    text = "" if value is None else str(value)
+    if text.lower() in ("true", "false"):
+        return "Yes" if text.lower() == "true" else "No"
+    if text.isupper():
+        text = re.sub(r"\bLlc\b", "LLC", text.title())
+    return text
+
+
+def build_visual(spec: dict, history: list) -> tuple[dict | None, str]:
+    """The model's block, filled in from the lookup it names. (visual, why-not)."""
+    kind = str(spec.get("type") or "").lower()
+    if kind not in VISUAL_TYPES:
+        return None, "unknown type %r" % kind
+    label = spec.get("label") or ""
+    values = spec.get("values") or ([spec["value"]] if spec.get("value") else [])
+    values = [v for v in values if isinstance(v, str)][:4]
+    columns = [c for c in (spec.get("columns") or []) if isinstance(c, str)][:6]
+    needs = ([label] if label else []) + values + columns
+    if kind == "map":
+        needs = ["latitude", "longitude"]
+    source, rows = _visual_rows(history, str(spec.get("from") or ""), needs)
+    if not rows:
+        return None, "no lookup rows for %r" % spec.get("from")
+
+    where = spec.get("where") if isinstance(spec.get("where"), dict) else {}
+    for col, want in where.items():
+        rows = [r for r in rows if str(r.get(col, "")).lower() == str(want).lower()]
+    rows = rows[:VISUAL_MAX_ROWS[kind]]
+    if not rows:
+        return None, "no rows left after where=%r" % where
+    title = " ".join(str(spec.get("title") or "").split())[:80]
+    out = {"type": kind, "title": title, "source": source}
+
+    if kind == "map":
+        points = []
+        for r in rows:
+            lat, lon = _num(r.get("latitude")), _num(r.get("longitude"))
+            if lat is None or lon is None:
+                continue
+            points.append({"label": _title_case(r.get("customer_name") or r.get(label)),
+                           "lat": lat, "lon": lon,
+                           "status": r.get("rhythm_status") or "",
+                           "detail": r.get("in_words") or ""})
+        if not points:
+            return None, "no rows with coordinates"
+        out["points"] = points
+        first = rows[0]
+        if _num(first.get("from_lat")) is not None and _num(first.get("to_lat")) is not None:
+            out["route"] = {
+                "from": {"label": first.get("from_place") or "", "lat": _num(first["from_lat"]),
+                         "lon": _num(first["from_lon"])},
+                "to": {"label": first.get("to_place") or "", "lat": _num(first["to_lat"]),
+                       "lon": _num(first["to_lon"])},
+            }
+            # Cached from the lookup a moment ago, so no second request.
+            road = road_route(first["from_lat"], first["from_lon"], first["to_lat"], first["to_lon"])
+            if road:
+                out["route"].update(road)
+        return out, ""
+
+    if kind == "table":
+        cols = [c for c in columns if c in rows[0]] or \
+               [c for c in rows[0] if c not in _VISUAL_SKIP][:6]
+        out["columns"] = [{"name": c, "format": column_format(c)} for c in cols]
+        # Numbers as numbers, for the page to format; everything else as text.
+        out["rows"] = [[_num_or_none(r.get(c)) if _num_or_none(r.get(c)) is not None
+                        else _title_case(r.get(c)) for c in cols] for r in rows]
+        return out, ""
+
+    # bar, pie, line
+    values = [v for v in values if v in rows[0]]
+    if not values:
+        return None, "none of the value columns %r are in %s" % (spec.get("values"), source)
+    if len(rows) == 1 and len(values) > 1:
+        # One row, several columns: the columns are the categories, under the
+        # names the block gives them ("names") or their own, made readable.
+        names = spec.get("names") if isinstance(spec.get("names"), dict) else {}
+        if not names:
+            # The model tends to drop "names" when it copies a block; the
+            # lookup's own suggestion still has them.
+            try:
+                names = (common.find_spec(tool_specs(), source).get("visual") or {}).get("names") or {}
+            except common.Fail:
+                names = {}
+        labels = [str(names.get(v) or v.replace("_", " ").capitalize())[:40] for v in values]
+        series = [{"name": title or "", "format": column_format(values[0]),
+                   "values": [_num_or_none(rows[0].get(v)) for v in values]}]
+    else:
+        if label not in rows[0]:
+            return None, "label column %r is not in %s" % (label, source)
+        labels = [_title_case(r.get(label)) for r in rows]
+        series = [{"name": v.replace("_", " ").capitalize(), "format": column_format(v),
+                   "values": [_num_or_none(r.get(v)) for r in rows]} for v in values]
+    for s, v in zip(series, values):
+        # Progress toward a target gets its 100% line; other rates do not --
+        # a 5% share drawn against 100% is a sliver.
+        s["target"] = "target" in v and s["format"] == "percent"
+    if all(x is None for s in series for x in s["values"]):
+        return None, "value columns hold no numbers"
+    out.update({"labels": labels, "series": series[:1] if kind == "pie" else series})
+    return out, ""
+
+
+# ------------------------------------------------------------------ road routes
+#
+# The trip lookup measures stores against a straight line between the two
+# cities; OpenRouteService gives the road between them, for the map and for a
+# drive time the agent can quote. Only the two city points are sent -- never a
+# store. Without a key, or if the service is down, everything falls back to the
+# straight line: a trip question never fails because of this.
+
+ORS_URL = "https://api.openrouteservice.org/v2/directions/driving-car/geojson"
+ROUTE_TTL = 24 * 3600
+ROUTE_MAX_POINTS = 300          # plenty to follow the road on a phone screen
+_route_lock = threading.Lock()
+_route_cache: dict[tuple, dict] = {}
+
+
+def road_route(from_lat, from_lon, to_lat, to_lon) -> dict | None:
+    """{"miles", "minutes", "path": [[lat, lon], ...]} by road, or None."""
+    key = os.environ.get("ORS_API_KEY", "").strip()
+    try:
+        a = (float(from_lat), float(from_lon))
+        b = (float(to_lat), float(to_lon))
+    except (TypeError, ValueError):
+        return None
+    if not key:
+        return None
+    cache_key = (round(a[0], 3), round(a[1], 3), round(b[0], 3), round(b[1], 3))
+    with _route_lock:
+        hit = _route_cache.get(cache_key)
+        if hit and hit["at"] > time.time() - ROUTE_TTL:
+            return hit["route"]
+
+    body = json.dumps({"coordinates": [[a[1], a[0]], [b[1], b[0]]]}).encode("utf-8")
+    req = urllib.request.Request(ORS_URL, data=body, method="POST", headers={
+        "Authorization": key, "Content-Type": "application/json",
+        "Accept": "application/geo+json", "User-Agent": "voiceAI-sales-assistant"})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            feature = json.loads(resp.read().decode("utf-8"))["features"][0]
+        summary = feature["properties"]["summary"]
+        coords = feature["geometry"]["coordinates"]          # [lon, lat]
+    except urllib.error.HTTPError as exc:
+        # The body says why (quota, bad key) and never echoes the key.
+        sys.stderr.write("  ROUTE failed: HTTP %d %s\n" % (exc.code, exc.read()[:200]))
+        return None
+    except (urllib.error.URLError, OSError, ValueError, KeyError, IndexError, TypeError) as exc:
+        sys.stderr.write("  ROUTE failed: %s\n" % type(exc).__name__)
+        return None
+
+    step = max(1, len(coords) // ROUTE_MAX_POINTS)
+    path = [[round(lat, 5), round(lon, 5)] for lon, lat in coords[::step]]
+    if coords and path[-1] != [round(coords[-1][1], 5), round(coords[-1][0], 5)]:
+        path.append([round(coords[-1][1], 5), round(coords[-1][0], 5)])
+    route = {"miles": round(summary["distance"] / 1609.344),
+             "minutes": round(summary["duration"] / 60), "path": path}
+    with _route_lock:
+        if len(_route_cache) >= 256:
+            _route_cache.pop(next(iter(_route_cache)))
+        _route_cache[cache_key] = {"at": time.time(), "route": route}
+    return route
+
+
+def drive_words(route: dict, from_place: str, to_place: str) -> str:
+    """The drive as the agent should say it -- worked out here, because
+    turning 161 minutes into hours is arithmetic the model gets wrong."""
+    minutes = max(5, int(round(route["minutes"] / 5.0)) * 5)
+    hours, mins = divmod(minutes, 60)
+    took = " ".join(filter(None, [
+        "%d hour%s" % (hours, "" if hours == 1 else "s") if hours else "",
+        "%d minutes" % mins if mins else ""]))
+    return ("From %s to %s is about %d miles by road, about %s of driving without traffic."
+            % (from_place, to_place, route["miles"], took))
+
+
+def _num_or_none(value):
+    try:
+        return _num(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def take_visuals(answer: str, history: list) -> tuple[str, list]:
+    """The answer without its visual blocks, and the visuals they describe.
+
+    Any fenced block goes, visual or not: code read aloud is never right.
+    """
+    found = []
+
+    def keep(raw: str) -> None:
+        try:
+            spec = json.loads(raw.strip())
+        except ValueError:
+            sys.stderr.write("  VISUAL dropped: not JSON\n")
+            return
+        if not isinstance(spec, dict) or "type" not in spec:
+            return
+        visual, why = build_visual(spec, history)
+        if visual:
+            found.append(visual)
+        else:
+            sys.stderr.write("  VISUAL %s dropped: %s\n" % (spec.get("type"), why))
+
+    def fenced(match):
+        keep(match.group(2))
+        return ""
+
+    def bare(match):
+        keep(match.group(0))
+        return ""
+
+    text = _VISUAL_FENCE.sub(fenced, answer)
+    text = _VISUAL_BARE.sub(bare, text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    if not found and _CLAIMS_SCREEN.search(text):
+        # "I've put a breakdown on your screen" with no block written, or one
+        # that could not be built: the rep would look for a picture that is
+        # not there. The lookup's own suggestion makes the sentence true.
+        for message in reversed(history):
+            if message.get("role") != "tool":
+                continue
+            try:
+                block = json.loads(message.get("content") or "{}").get("show_on_screen") or ""
+            except (ValueError, AttributeError):
+                continue
+            inner = _VISUAL_FENCE.search(block)
+            if inner:
+                sys.stderr.write("  VISUAL claimed but not written: using the lookup's suggestion\n")
+                keep(inner.group(2))
+                break
+    return text, found[:1]
+
+
+_CLAIMS_SCREEN = re.compile(r"\b(on (your|the) screen|on a map|on the map)\b", re.I)
 
 
 def last_user_text(messages: list) -> str:
@@ -497,7 +900,23 @@ def run_tool_call(name: str, value: str, rep: str = "") -> str:
                     pass        # leave the row as it is rather than fail the lookup
         if name == "lookup_rep_sales":
             add_vs_last_month(records)
-        return json.dumps({"row_count": len(records), "rows": records})
+            name_periods(records)
+        payload = {"row_count": len(records), "rows": records}
+        if name == "lookup_accounts_on_route" and records:
+            first = records[0]
+            route = road_route(first.get("from_lat"), first.get("from_lon"),
+                               first.get("to_lat"), first.get("to_lon"))
+            if route:
+                payload["drive"] = drive_words(route, first.get("from_place") or "the start",
+                                               first.get("to_place") or "the destination")
+        # A ready-made visual block for these rows, next to them. Rules in the
+        # prompt alone got a bar chart for a trip and nothing for a pitch list;
+        # a block to copy is much harder to get wrong. The model still chooses
+        # whether to use it, and may change it to fit the question.
+        if records and spec.get("visual"):
+            block = dict(spec["visual"], **{"from": name})
+            payload["show_on_screen"] = "```visual\n%s\n```" % json.dumps(block)
+        return json.dumps(payload)
     except common.Fail as exc:
         return json.dumps({"error": str(exc)})
 
@@ -624,9 +1043,92 @@ def add_vs_last_month(records: list) -> None:
         pass
 
 
+def name_periods(records: list) -> None:
+    """A name for each sales period: "October", not "month" twice over.
+
+    The rows are told apart by period_type and period_start together, which is
+    fine for reading and no use as a chart label.
+    """
+    import datetime
+    for r in records:
+        try:
+            start = datetime.date.fromisoformat(r.get("period_start") or "")
+        except ValueError:
+            continue
+        current = str(r.get("is_current")).lower() == "true"
+        kind = r.get("period_type")
+        if kind == "day":
+            r["period"] = "Today" if current else start.strftime("%b %d")
+        elif kind == "week":
+            r["period"] = "This week" if current else "Week of " + start.strftime("%b %d")
+        elif kind == "month":
+            r["period"] = start.strftime("%B")
+        elif kind == "quarter":
+            r["period"] = "Q%d" % ((start.month - 1) // 3 + 1)
+        elif kind == "year":
+            r["period"] = str(start.year)
+
+
+def read_account_rhythm(r: dict) -> str:
+    """One account from the call-planning lookups, as the sentence to say.
+
+    The point of these lookups is the account's own rhythm -- "usually every 30
+    days, it's been 54" -- and that is a ratio the model would otherwise have to
+    rebuild from three columns, the kind of arithmetic it has been getting wrong.
+    """
+    name = re.sub(r"\bLlc\b", "LLC", (r.get("customer_name") or "").title())
+    city = (r.get("city") or "").title()
+    place = ", ".join(x for x in (city, (r.get("state") or "").upper()) if x)
+    head = "%s in %s" % (name, place) if place else name
+    if r.get("address"):
+        # Without the street a rep planning a stop has to look it up again.
+        head += ", %s" % r["address"].title()
+    days12 = int(_num(r.get("invoice_days_12m")) or 0)
+    gap, since, past = _num(r.get("usual_gap_days")), _num(r.get("days_since_last_invoice")), _num(r.get("days_past_usual"))
+    all_time = _num(r.get("invoice_days_all_time"))
+    status = (r.get("rhythm_status") or "").lower()
+    if all_time and since is not None and status in ("former regular", "dormant"):
+        # The win-back list: a store that bought often and stopped. "Buys
+        # occasionally" would describe its last year, not what it was.
+        body = "a former regular -- bought on %d days in all; last invoice %d days ago" % (all_time, since)
+        all_time = None
+    elif gap is not None and since is not None:
+        body = "usually buys about every %d days; last invoice %d days ago" % (gap, since)
+        if past is not None:
+            body += (", %.1f times its usual gap" % past) if past >= 1 else ", still within its usual gap"
+    elif since is not None:
+        body = ("buys only occasionally (%d invoice day%s in the last year); last invoice %d days ago"
+                % (days12, "" if days12 == 1 else "s", since))
+    else:
+        body = "no invoices on record"
+    if all_time:
+        body += "; bought on %d days in all" % all_time
+    extras = []
+    if r.get("delivery_days"):
+        extras.append("takes deliveries %s" % r["delivery_days"])
+    if str(r.get("appointment_required")).lower() == "true":
+        extras.append("needs an appointment")
+    off, start = _num(r.get("miles_off_route")), _num(r.get("miles_from_start"))
+    to_city = (r.get("to_place") or "").split(",")[0].strip().lower()
+    if off is not None and start is not None and to_city and to_city == city.lower():
+        # Stores in the destination itself are not "on the way" -- that is
+        # where the rep is going, and saying otherwise misplaces them.
+        extras.append("in the city the rep is headed to, not on the way")
+    elif off is not None and start is not None:
+        extras.append("on the way: about %d miles off the route, %d miles into the drive (as the crow flies)"
+                      % (round(off), start))
+    return "%s: %s%s." % (head, body, ("; " + "; ".join(extras)) if extras else "")
+
+
 # Lookups whose rows get a plain-language reading added before the model sees
 # them -- where the raw columns proved easy to misread.
-ROW_READERS = {"lookup_rep_sales": read_rep_sales}
+ROW_READERS = {
+    "lookup_rep_sales": read_rep_sales,
+    "lookup_accounts_to_call": read_account_rhythm,
+    "lookup_winback_accounts": read_account_rhythm,
+    "lookup_accounts_in_city": read_account_rhythm,
+    "lookup_accounts_on_route": read_account_rhythm,
+}
 
 
 _DECIMAL = re.compile(r"-?\d+\.\d+")
@@ -680,7 +1182,8 @@ def call_upstream_llm(messages: list, model: str, max_tokens: int, tools: list) 
 
 
 def run_llm_with_tools(messages: list, model: str, max_tokens: int, rep: str = "",
-                       before_lookup=None, trace: list | None = None) -> str:
+                       before_lookup=None, trace: list | None = None,
+                       visuals: list | None = None) -> str:
     """The tool-calling loop that used to run on ElevenLabs' side: ask the
     model, execute anything it asks for ourselves, feed the result back, and
     repeat until it answers in plain text (or we hit the round cap).
@@ -692,12 +1195,52 @@ def run_llm_with_tools(messages: list, model: str, max_tokens: int, rep: str = "
 
     `trace`, if given, receives the tool calls and results this turn added to
     the conversation -- the evidence the answer rests on (see live_remember).
+
+    `visuals`, if given, receives the charts the answer asked for, filled in
+    from the lookups (see take_visuals); the answer comes back without them.
     """
     history = list(messages)
     answer = _tool_loop(history, model, max_tokens, rep, before_lookup)
     if trace is not None:
         trace.extend(history[len(messages):])
+    answer, found = take_visuals(answer, history)
+    if visuals is not None:
+        visuals.extend(found)
     return answer
+
+
+ASK_FOR_START = json.dumps({"error": (
+    "The rep has not said where they are starting from, and you do not know where they are. "
+    "Do not guess. Ask them: 'Where will you be starting from?' -- then look up the route "
+    "with both cities. If they are already there, use lookup_accounts_in_city instead.")})
+
+
+def unsaid_start(name: str, value: str, history: list) -> bool:
+    """True when a route lookup starts from a city the rep never said.
+
+    We have no idea where a rep is, and the model, told to ask, filled the gap
+    anyway -- "heading to Madison" went out as "Milwaukee to Madison", the
+    starting city lifted from the tool's own example. Asked or not, the start
+    has to have come out of the rep's mouth.
+    """
+    if name != "lookup_accounts_on_route":
+        return False
+    ends = re.split(r"(?i)\s+to\s+", value.strip())
+    start = _place_words(re.sub(r",.*$", "", ends[0]))
+    if len(ends) < 2 or not start.strip():
+        return True
+    said = _place_words(" ".join(m.get("content") or "" for m in history
+                                 if m.get("role") == "user" and isinstance(m.get("content"), str)))
+    return start not in said
+
+
+def _place_words(text: str) -> str:
+    """Place names compared as words, St/Ft/Mt spelled out -- the rep says
+    "St. Louis", the model may write "Saint Louis", and both are the same place."""
+    words = " " + " ".join(re.sub(r"[.,]", " ", (text or "").lower()).split()) + " "
+    for short, full in ((" st ", " saint "), (" ft ", " fort "), (" mt ", " mount ")):
+        words = words.replace(short, full)
+    return words
 
 
 def _tool_loop(history: list, model: str, max_tokens: int, rep: str, before_lookup) -> str:
@@ -735,16 +1278,26 @@ def _tool_loop(history: list, model: str, max_tokens: int, rep: str, before_look
                 return ("Sorry, I lost my train of thought there. "
                         "Could you ask me that again?")
 
-        if before_lookup and before_lookup(message.get("content") or "") is False:
-            return ""
-        history.append(message)
-        for call in calls:
+        def parsed_call(call):
             fn = call.get("function") or {}
             try:
                 args = json.loads(fn.get("arguments") or "{}")
             except ValueError:
                 args = {}
-            name, value = fn.get("name") or "", args.get("value") or ""
+            return fn.get("name") or "", args.get("value") or ""
+
+        # "Let me check" before a question back to the rep would be a promise
+        # of a lookup that is not going to happen.
+        asking = all(unsaid_start(*parsed_call(c), history) for c in calls)
+        if not asking and before_lookup and before_lookup(message.get("content") or "") is False:
+            return ""
+        history.append(message)
+        for call in calls:
+            name, value = parsed_call(call)
+            if unsaid_start(name, value, history):
+                sys.stderr.write("  TOOL %s(%r) blocked: start city not said\n" % (name, value))
+                history.append({"role": "tool", "tool_call_id": call.get("id"), "content": ASK_FOR_START})
+                continue
             result = run_tool_call(name, value, rep)
             # One line per lookup, because when an answer is wrong the first
             # question is always which tool ran and what it was asked for.
@@ -818,6 +1371,7 @@ def sales_reps() -> list:
     _reps_error = ""
     with _reps_lock:
         _reps_cache, _reps_fetched = reps, time.time()
+    mark_warehouse_ready()
     return reps
 
 
@@ -849,13 +1403,18 @@ CSP_POLICY = (
     "script-src 'self' blob: https://cdn.jsdelivr.net; "
     "worker-src 'self' blob:; "
     "child-src 'self' blob:; "
-    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+    # jsdelivr styles and OpenStreetMap tiles are for the map under trip
+    # answers (public/visuals.js). Only tile images come from OSM; the pins are
+    # drawn in the page, so no customer data goes there.
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; "
     "font-src 'self' https://fonts.gstatic.com; "
-    "img-src 'self' data:; "
+    "img-src 'self' data: https://tile.openstreetmap.org; "
     "media-src 'self' blob: mediastream:; "
     "connect-src 'self' https://cdn.jsdelivr.net https://api.elevenlabs.io "
     "wss://api.elevenlabs.io https://*.elevenlabs.io wss://*.elevenlabs.io; "
-    "frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    # 'self', not 'none': /preview.html frames the app at browser and PDA
+    # size. Other sites still cannot frame it.
+    "frame-ancestors 'self'; base-uri 'none'; form-action 'self'"
 )
 
 
@@ -942,7 +1501,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
-        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Permissions-Policy", "microphone=(self), camera=(), geolocation=()")
         if CSP:
@@ -1012,6 +1571,13 @@ class Handler(BaseHTTPRequestHandler):
         if not self._user():
             if route.startswith("/api"):
                 self._json(401, {"error": "Not signed in.", "login": "/login"})
+            elif _RETURN_PAGE.match(route):
+                # Opening /preview.html signed out used to land on the main
+                # page after sign-in, which looks like the preview not working.
+                self._redirect("/login", [(
+                    "Set-Cookie",
+                    "%s=%s; Path=/; Max-Age=600; HttpOnly; SameSite=Strict"
+                    % (AFTER_LOGIN_COOKIE, route.lstrip("/")))])
             else:
                 self._redirect("/login")
             return
@@ -1078,7 +1644,16 @@ class Handler(BaseHTTPRequestHandler):
         cookie = "%s=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Strict%s" % (
             auth.SESSION_COOKIE, auth.issue_session(username),
             auth.session_lifetime(), "" if INSECURE_COOKIE else "; Secure")
-        self._redirect("/", [("Set-Cookie", cookie)])
+        # Back to the page that sent them here, if it was one of ours.
+        jar = http.cookies.SimpleCookie()
+        try:
+            jar.load(self.headers.get("Cookie") or "")
+        except http.cookies.CookieError:
+            pass
+        wanted = "/" + (jar[AFTER_LOGIN_COOKIE].value if AFTER_LOGIN_COOKIE in jar else "")
+        target = wanted if _RETURN_PAGE.match(wanted) else "/"
+        self._redirect(target, [("Set-Cookie", cookie), (
+            "Set-Cookie", "%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict" % AFTER_LOGIN_COOKIE)])
 
     def _stream_live(self, call: str) -> None:
         """Server-sent events for one call: the rep's words as the proxy gets them.
@@ -1162,6 +1737,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if route == "/api/live":
             self._stream_live((query.get("call") or [""])[0])
+            return
+
+        if route == "/api/ready":
+            # Held open until the warehouse answers, so the page can show
+            # "Getting ready" instead of letting the first question be the slow
+            # one. A successful rep-list query already proves it is awake.
+            awake, detail = wait_for_warehouse()
+            self._json(200, {"ready": awake, "detail": detail})
             return
 
         if route == "/api/reps":
@@ -1437,9 +2020,10 @@ class Handler(BaseHTTPRequestHandler):
                 live_publish_reply(call, line + " ", start=False, seq=seq)
 
         threading.Thread(target=keep_alive, daemon=True).start()
+        visuals: list = []
         try:
             answer = run_llm_with_tools(with_display_style(with_evidence(call, messages)),
-                                        model, max_tokens, rep, before_lookup, exchange)
+                                        model, max_tokens, rep, before_lookup, exchange, visuals)
         except UpstreamError as exc:
             sys.stderr.write("  LLM proxy upstream error: %s\n" % exc.message)
             answer = "I'm sorry, I ran into a problem answering that."
@@ -1455,6 +2039,9 @@ class Handler(BaseHTTPRequestHandler):
         sent = event(delta({"content": speakable(answer)}))
         if sent:
             live_publish_reply(call, answer, start=not spoken, seq=seq)
+            for visual in visuals:
+                live_publish_visual(call, visual, seq=seq)
+                sys.stderr.write("  VISUAL %s from %s\n" % (visual["type"], visual.get("source")))
             if live_is_current(call, seq):
                 live_remember(call, speakable(answer), exchange)
         if sent and event(delta({}, "stop")) and event("[DONE]"):
@@ -1483,6 +2070,26 @@ class Handler(BaseHTTPRequestHandler):
         if ctype.startswith("text/") or ctype in ("application/javascript", "application/json"):
             ctype += "; charset=utf-8"
         self._send(200, target.read_bytes(), ctype)
+
+
+# Where sign-in returns to: one of our own pages, by name, and nothing else --
+# a free-form "next" is how a login page becomes an open redirect.
+AFTER_LOGIN_COOKIE = "after_login"
+_RETURN_PAGE = re.compile(r"^/[A-Za-z0-9_-]+\.html$")
+
+
+class QuietServer(ThreadingHTTPServer):
+    """ThreadingHTTPServer without a traceback for a client that hung up.
+
+    ElevenLabs abandons a request whenever the rep pauses and carries on, and
+    each one printed twenty lines of ConnectionAbortedError that buried the
+    lines worth reading.
+    """
+
+    def handle_error(self, request, client_address):
+        if isinstance(sys.exc_info()[1], (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)):
+            return
+        super().handle_error(request, client_address)
 
 
 def main() -> int:
@@ -1533,7 +2140,11 @@ def main() -> int:
     print("")
 
     try:
-        httpd = ThreadingHTTPServer((args.host, args.port), Handler)
+        httpd = QuietServer((args.host, args.port), Handler)
+        # The first page to open used to fetch the rep list itself and wait on
+        # a cold warehouse while the picker showed only "All reps". Fetching it
+        # now usually has it ready before anyone signs in.
+        threading.Thread(target=sales_reps, daemon=True, name="reps-prefetch").start()
     except OSError as exc:
         print("  Could not bind %s:%d -- %s" % (args.host, args.port, exc), file=sys.stderr)
         print("  Try: python server.py --port 8081", file=sys.stderr)

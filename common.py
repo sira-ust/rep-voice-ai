@@ -211,8 +211,10 @@ def load_specs() -> list[dict]:
     names = set()
     for spec in specs:
         required = ["name", "table", "description"]
-        # A rank tool orders by a named mode; it has no lookup column.
-        required.append("modes" if spec.get("kind") == "rank" else "lookup_column")
+        # A rank tool orders by a named mode and a sql tool carries its own
+        # query; neither has a lookup column.
+        kind = spec.get("kind")
+        required.append({"rank": "modes", "sql": "sql"}.get(kind, "lookup_column"))
         for field in required:
             if not spec.get(field):
                 raise Fail("Tool %r is missing %r" % (spec.get("name", "?"), field))
@@ -272,6 +274,17 @@ def statement(spec: dict, rep: str = "") -> str:
     # one this tool is about, so the drift check and the web guide still have a
     # single table to point at.
     table = spec.get("from") or spec["table"]
+
+    # kind "sql": a query too shaped for the generic builder -- the route lookup
+    # takes two places from one value and measures distances. Still pinned like
+    # every other tool: the text is fixed in databricks_tools.json, the model
+    # supplies only :lookup_value, and {rep_filter} is where the rep limit goes
+    # (" AND <rep_column> = :rep_name", or nothing for a manager).
+    if spec.get("kind") == "sql":
+        text = " ".join(spec["sql"]) if isinstance(spec["sql"], list) else spec["sql"]
+        if "{rep_filter}" not in text:
+            raise Fail("Tool %r is kind 'sql' but has no {rep_filter}" % spec["name"])
+        return text.replace("{rep_filter}", rep_clause(spec) if rep else "")
 
     # kind "rank": the model picks a named mode from an enum instead of supplying
     # a search value. The mode selects which column to order by, through a CASE

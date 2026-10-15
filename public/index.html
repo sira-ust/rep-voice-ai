@@ -68,8 +68,50 @@
         <p class="note" id="llmNote"></p>
         <p class="note" id="keyNote"></p>
       </div>
+      <!-- The event log is here, behind the gear: on the main screen it was
+           either outside the CT70 frame on a desktop or missing on the device. -->
+      <section class="debug">
+        <div class="debug-head">
+          <button class="debug-toggle" id="debugToggle" aria-expanded="false">
+            <span class="debug-caret" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round">
+                <path d="M9 6l6 6-6 6"/>
+              </svg>
+            </span>
+            Event log
+            <span class="debug-count" id="debugCount">0</span>
+          </button>
+          <div class="debug-actions">
+            <span class="debug-stat" id="debugStat"></span>
+            <button class="btn-mini" id="debugDetail" aria-pressed="false"
+                    title="Include message text and tool payloads in the log">Details off</button>
+            <button class="btn-mini" id="debugCopy">Copy</button>
+            <button class="btn-mini" id="debugClear">Clear</button>
+          </div>
+        </div>
+        <pre class="debug-log" id="debugLog" hidden></pre>
+      </section>
     </section>
 
+    <section class="transcript-section">
+      <!-- Pinned above the chat, so what to ask stays in view the whole call. -->
+      <div class="topic-bar" id="topicBar" hidden>
+        <div class="topic-bar-head">
+          <span class="guide-subject">Ask me about</span>
+          <div class="topic-bar-topics" id="topicBarTopics"></div>
+        </div>
+        <div class="topic-bar-panel" id="topicBarPanel" hidden></div>
+      </div>
+      <div class="transcript" id="transcript">
+        <div class="guide" id="guide">
+          <div class="guide-groups" id="guideGroups"></div>
+          <p class="guide-foot" id="guideFoot"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- The call controls, at the bottom where a thumb reaches them on the
+         PDA. Voice only: there is no text box. -->
     <main class="stage">
       <div class="orb" id="orb">
         <span class="orb-halo"></span>
@@ -125,47 +167,6 @@
         </div>
       </div>
     </main>
-
-    <section class="transcript-section">
-      <div class="transcript" id="transcript">
-        <div class="guide" id="guide">
-          <p class="guide-lede">
-            Speak naturally and follow up without repeating yourself. It will
-            say it is checking, look the figures up, then answer in a sentence
-            or two. Name a store and it reads back the city and owner first,
-            because store names repeat.
-          </p>
-          <div class="guide-groups" id="guideGroups"></div>
-          <p class="guide-foot" id="guideFoot"></p>
-        </div>
-      </div>
-      <form class="composer" id="composer">
-        <input id="composerInput" type="text" placeholder="Type a message to the agent…" autocomplete="off" disabled />
-        <button class="btn btn-ghost" type="submit" id="composerSend" disabled>Send</button>
-      </form>
-    </section>
-
-    <section class="debug">
-      <div class="debug-head">
-        <button class="debug-toggle" id="debugToggle" aria-expanded="false">
-          <span class="debug-caret" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round">
-              <path d="M9 6l6 6-6 6"/>
-            </svg>
-          </span>
-          Event log
-          <span class="debug-count" id="debugCount">0</span>
-        </button>
-        <div class="debug-actions">
-          <span class="debug-stat" id="debugStat"></span>
-          <button class="btn-mini" id="debugDetail" aria-pressed="false"
-                  title="Include message text and tool payloads in the log">Details off</button>
-          <button class="btn-mini" id="debugCopy">Copy</button>
-          <button class="btn-mini" id="debugClear">Clear</button>
-        </div>
-      </div>
-      <pre class="debug-log" id="debugLog" hidden></pre>
-    </section>
 
   </div>
 

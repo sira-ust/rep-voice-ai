@@ -4,6 +4,7 @@
 // for a short-lived conversation token / signed URL and hands it to the SDK.
 
 import { Conversation } from "https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.25.0/+esm";
+import { renderVisual } from "/visuals.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -34,10 +35,10 @@ const el = {
   transcript: $("transcript"),
   guide: $("guide"),
   guideGroups: $("guideGroups"),
+  topicBar: $("topicBar"),
+  topicBarTopics: $("topicBarTopics"),
+  topicBarPanel: $("topicBarPanel"),
   guideFoot: $("guideFoot"),
-  composer: $("composer"),
-  composerInput: $("composerInput"),
-  composerSend: $("composerSend"),
   debugToggle: $("debugToggle"),
   debugLog: $("debugLog"),
   debugCount: $("debugCount"),
@@ -57,7 +58,7 @@ const state = {
   // Live agent reply being streamed in, so an aborted turn still shows text.
   streaming: { id: null, node: null, text: "" },
   // The rep's words as our own proxy saw them, ahead of ElevenLabs' copy.
-  live: { source: null, node: null, reply: null },
+  live: { source: null, node: null, reply: null, visuals: [] },
   // Counters surfaced in the debug header -- the fastest way to tell whether
   // the server's JSON events are reaching the browser at all.
   counts: { incoming: 0, transcripts: 0, agentReplies: 0, audioSent: 0 },
@@ -65,6 +66,11 @@ const state = {
   // False until a key is loaded and an agent is selected, so the idle pill can
   // distinguish "Ready" from "Not configured".
   ready: false,
+  // True until the agent, the rep list and the data warehouse are all ready.
+  // The rep list comes from Databricks, so on a cold warehouse it used to
+  // arrive many seconds after the page, which sat showing only "All reps" --
+  // and a call started then would have run as the manager view.
+  loading: true,
 };
 
 // ---------------------------------------------------------------- debug log
@@ -236,20 +242,34 @@ function render() {
 
   const live = status === "connected";
   const busy = status === "connecting" || status === "disconnecting";
+  // For the layout: on a PDA the controls shrink to one row once a call is
+  // under way, so the answers get the screen (styles.css, "PDA view").
+  document.body.dataset.call = live ? "live" : busy ? "busy" : "idle";
   el.callBtn.classList.toggle("is-live", live);
   el.callBtn.disabled = busy;
   // Locked for the duration of a call. The agent is told who it is speaking to
   // once, at the start, so changing it mid-conversation would leave the picker
   // and every answer disagreeing about whose accounts these are.
   if (el.repSelect) el.repSelect.disabled = live || busy;
+  // The live controls are one row at CT70 width, which "End conversation" overfills.
   el.callBtnLabel.textContent = live
-    ? "End conversation"
+    ? "End call"
     : busy
       ? STATUS_LABEL[status]
       : "Start conversation";
 
+  if (state.loading) {
+    el.callBtn.disabled = true;
+    if (el.repSelect) el.repSelect.disabled = true;
+    el.callBtnLabel.textContent = "Getting ready…";
+    el.statusText.textContent = "Getting ready";
+  }
+
   el.orb.className = "orb";
-  if (busy) {
+  if (state.loading) {
+    el.orb.classList.add("connecting");
+    el.modeLabel.textContent = "Getting ready — loading your reps and waking the data…";
+  } else if (busy) {
     el.orb.classList.add("connecting");
     el.modeLabel.textContent = STATUS_LABEL[status];
   } else if (live) {
@@ -263,8 +283,6 @@ function render() {
   el.muteBtn.disabled = !live;
   el.muteBtn.classList.toggle("active", state.muted);
   el.muteBtn.title = state.muted ? "Unmute microphone" : "Mute microphone";
-  el.composerInput.disabled = !live;
-  el.composerSend.disabled = !live;
   el.agentSelect.disabled = live;
   el.agentIdInput.disabled = live;
   el.connSelect.disabled = live;
@@ -471,6 +489,7 @@ async function startConversation() {
           // The reply is confirmed, so the turn is over: the next words from
           // the rep start a new bubble.
           state.live.node = null;
+          state.live.visuals = [];        // confirmed: they stay with this turn
           if (state.live.reply && state.live.reply.isConnected) {
             state.live.reply = null;
           } else if (state.streaming.node) {
@@ -593,6 +612,10 @@ function openLiveTranscript(callId) {
     } catch {
       return;
     }
+    if (item && item.type === "visual") {
+      showVisual(item.visual);
+      return;
+    }
     if (!item || !item.text) return;
     if (item.type === "agent") {
       showLiveReply(item);
@@ -611,6 +634,8 @@ function openLiveTranscript(callId) {
     // to; ElevenLabs dropped it, so it comes off the screen.
     if (state.live.reply && state.live.reply.isConnected) state.live.reply.remove();
     state.live.reply = null;
+    for (const card of state.live.visuals) card.remove();
+    state.live.visuals = [];
     const node = state.live.node;
     if (node && node.isConnected) {
       node.textContent = item.text;
@@ -675,9 +700,29 @@ function renderReply(node, raw) {
   node.innerHTML = html.map((p) => (Array.isArray(p) ? `<ul>${p.join("")}</ul>` : p)).join("");
 }
 
+/**
+ * A chart, table or map under this turn's reply. It arrives after the reply's
+ * text, built by the server from the lookup rows, and goes if the reply does --
+ * ElevenLabs dropping the turn takes its picture with it.
+ */
+function showVisual(visual) {
+  let card = null;
+  try {
+    card = renderVisual(visual);
+  } catch (err) {
+    log("err", "visual", err.message || String(err));
+  }
+  if (!card) return;
+  logDetailed("in", "live visual", `${visual.type}: ${visual.title || ""}`);
+  el.transcript.appendChild(card);
+  // Only an unconfirmed turn's picture can still be withdrawn.
+  if (state.live.reply) state.live.visuals.push(card);
+  el.transcript.scrollTop = el.transcript.scrollHeight;
+}
+
 function closeLiveTranscript() {
   if (state.live.source) state.live.source.close();
-  state.live = { source: null, node: null, reply: null };
+  state.live = { source: null, node: null, reply: null, visuals: [] };
 }
 
 function teardown() {
@@ -736,16 +781,6 @@ el.agentSelect.addEventListener("change", () => {
 });
 
 el.agentIdInput.addEventListener("change", refreshAgentInfo);
-
-el.composer.addEventListener("submit", (event) => {
-  event.preventDefault();
-  const text = el.composerInput.value.trim();
-  if (!text || !state.conversation) return;
-  logDetailed("out", "sendUserMessage", text);
-  state.conversation.sendUserMessage(text);
-  addMessage(text, "user");
-  el.composerInput.value = "";
-});
 
 el.debugToggle.addEventListener("click", () => {
   const open = el.debugLog.hidden;
@@ -864,78 +899,78 @@ async function loadGuide() {
   if (!groups.length || !el.guideGroups) return;
 
   el.guideGroups.innerHTML = "";
-  const tables = [];
-  for (const group of groups) {
-    for (const table of group.tables || []) {
-      if (!tables.includes(table.name)) tables.push(table.name);
-    }
+
+  const TOPIC_COLOURS = 7;      // .topic-0 to .topic-6 in styles.css
+
+  // An example question, in its topic's colour. Something to say, not to
+  // tap: the app is voice only, so there is nowhere to send it to.
+  const askExample = (question, i) => {
+    const chip = document.createElement("span");
+    chip.className = `guide-ask topic-${i % TOPIC_COLOURS}`;
+    chip.textContent = question;
+    return chip;
+  };
+
+  // The topics, pinned above the chat. The guide inside the chat goes with
+  // the first message, and a rep mid-call still needs to know what they can
+  // ask -- so the areas stay in view the whole time, as coloured bubbles.
+  // Picking one opens its example questions under the bar; picking it again
+  // closes them.
+  if (el.topicBar && el.topicBarTopics && el.topicBarPanel) {
+    let picked = null;
+    el.topicBarTopics.innerHTML = "";
+    const showPanel = () => {
+      const panel = el.topicBarPanel;
+      panel.innerHTML = "";
+      panel.hidden = picked === null;
+      [...el.topicBarTopics.children].forEach((b, i) => {
+        b.classList.toggle("is-picked", picked === i);
+        b.setAttribute("aria-expanded", String(picked === i));
+      });
+      if (picked === null) return;
+      const group = groups[picked];
+      for (const question of (group.questions || []).slice(0, 6)) {
+        panel.appendChild(askExample(question, picked));
+      }
+    };
+    groups.forEach((group, i) => {
+      const bubble = document.createElement("button");
+      bubble.type = "button";
+      bubble.className = `guide-topic topic-${i % TOPIC_COLOURS}`;
+      bubble.textContent = group.subject;
+      bubble.setAttribute("aria-expanded", "false");
+      bubble.setAttribute("aria-controls", "topicBarPanel");
+      // The tables behind a topic, what they hold and what they cannot answer:
+      // there for anyone who wants it, costing nothing to anyone who does not.
+      bubble.title = (group.tables || [])
+        .map((t) => [t.label || t.name, t.about,
+                     t.notCovered && "Not in this data: " + t.notCovered]
+          .filter(Boolean).join("\n"))
+        .join("\n\n");
+      bubble.addEventListener("click", () => {
+        picked = picked === i ? null : i;
+        showPanel();
+      });
+      el.topicBarTopics.appendChild(bubble);
+    });
+    el.topicBar.hidden = false;
   }
 
-  // Two lists: what it knows about, then what asking looks like. Earlier this
-  // was a block per topic carrying its own tables, description and caveats,
-  // which was six of everything on the one screen meant to get someone talking.
-  const topics = document.createElement("div");
-  topics.className = "guide-group";
-  const topicsLabel = document.createElement("span");
-  topicsLabel.className = "guide-subject";
-  topicsLabel.textContent = "Topics";
-  topics.appendChild(topicsLabel);
-
-  const topicList = document.createElement("ul");
-  topicList.className = "guide-about";
-  for (const group of groups) {
-    const li = document.createElement("li");
-    li.textContent = group.subject;
-    // The tables behind a topic, what they hold and what they cannot answer:
-    // there for anyone who wants it, costing nothing to anyone who does not.
-    li.title = (group.tables || [])
-      .map((t) => [t.label || t.name, t.about,
-                   t.notCovered && "Not in this data: " + t.notCovered]
-        .filter(Boolean).join("\n"))
-      .join("\n\n");
-    topicList.appendChild(li);
-  }
-  topics.appendChild(topicList);
-  el.guideGroups.appendChild(topics);
-
+  // Before the first message: one example per topic, in its topic's colour,
+  // so the empty chat shows what a question sounds like.
   const asking = document.createElement("div");
   asking.className = "guide-group";
   const askingLabel = document.createElement("span");
   askingLabel.className = "guide-subject";
-  askingLabel.textContent = "Types of questions";
+  askingLabel.textContent = "Try asking";
   asking.appendChild(askingLabel);
-
   const asks = document.createElement("div");
   asks.className = "guide-asks";
-  // Two per topic. One left three questions standing for three broad sections,
-  // which reads as a thin tool rather than a shorthand.
-  for (const group of groups) {
-    for (const question of (group.questions || []).slice(0, 2)) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "guide-ask";
-      btn.textContent = question;
-      // Clicking loads it into the composer rather than sending, so the user
-      // can edit it and can see where their words go.
-      btn.addEventListener("click", () => {
-        el.composerInput.value = question;
-        if (!el.composerInput.disabled) el.composerInput.focus();
-        else el.modeLabel.textContent = "Start the conversation, then send it";
-      });
-      asks.appendChild(btn);
-    }
-  }
+  groups.forEach((group, i) => {
+    const question = (group.questions || [])[0];
+    if (question) asks.appendChild(askExample(question, i));
+  });
   asking.appendChild(asks);
-
-  // What an answer sounds like, once. Spoken answers are a sentence or two,
-  // and someone expecting a table reads that as the lookup having failed.
-  const example = groups.map((g) => (g.answers || [])[0]).find(Boolean);
-  if (example) {
-    const reply = document.createElement("p");
-    reply.className = "guide-limit";
-    reply.textContent = "Answers like: \u201c" + example + "\u201d";
-    asking.appendChild(reply);
-  }
   el.guideGroups.appendChild(asking);
 
   // Questions the PDF asks for that nothing can answer yet. Better read here
@@ -959,23 +994,7 @@ async function loadGuide() {
       list.appendChild(li);
     }
     block.appendChild(list);
-
-    const waiting = [...new Set(tbd.map((t) => t.waitingOn).filter(Boolean))];
-    if (waiting.length) {
-      const note = document.createElement("p");
-      note.className = "guide-limit";
-      note.textContent = "Waiting on " + waiting.join(", ") + ".";
-      block.appendChild(note);
-    }
     el.guideGroups.appendChild(block);
-  }
-
-  if (el.guideFoot) {
-    // The gaps worth knowing before you ask, in one line rather than one per
-    // topic. Everything else about a topic is on its tooltip.
-    el.guideFoot.textContent =
-      `Read live from ${tables.length} table${tables.length === 1 ? "" : "s"} ` +
-      "each time you ask, never from memory.";
   }
 }
 
@@ -1013,6 +1032,8 @@ async function init() {
     state.config = await getJSON("/api/config");
   } catch (err) {
     showError(`Could not read server config: ${err.message}`);
+    state.loading = false;
+    render();
     return;
   }
 
@@ -1024,6 +1045,8 @@ async function init() {
     el.keyNote.classList.add("warn");
     el.settingsPanel.hidden = false;
     showError("ELEVENLABS_API_KEY is missing from .env — the agent cannot be reached.");
+    state.loading = false;
+    render();
     return;
   }
 
@@ -1057,9 +1080,26 @@ async function init() {
   if (!el.agentIdInput.value) el.settingsPanel.hidden = false;
   state.ready = Boolean(state.config.hasApiKey && el.agentIdInput.value);
   render();
-  refreshAgentInfo();
-  loadReps();
   loadGuide();
+
+  // Hold the call button until all three are in: the agent, the rep list, and
+  // a warehouse that answers, so the first question is not the slow one. They
+  // run side by side; the rep list usually also wakes the warehouse.
+  const allOption = el.repSelect && el.repSelect.options[0];
+  if (allOption) allOption.textContent = "Loading reps…";
+  const [, , ready] = await Promise.allSettled([
+    refreshAgentInfo(),
+    loadReps(),
+    getJSON("/api/ready"),
+  ]);
+  if (allOption) allOption.textContent = "All reps (manager view)";
+  const awake = ready.status === "fulfilled" && ready.value && ready.value.ready;
+  log("out", "ready", awake ? "data warehouse awake" : "data warehouse still waking");
+  if (!awake) {
+    showRepNote("The data is still waking up, so the first answer may take a little longer.");
+  }
+  state.loading = false;
+  render();
 }
 
 init();

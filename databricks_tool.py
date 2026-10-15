@@ -222,7 +222,7 @@ def ensure_secret() -> str:
 
 
 def tool_payload(spec: dict, secret_id: str) -> dict:
-    label = spec.get("value_label") or spec["lookup_column"]
+    label = spec.get("value_label") or spec.get("lookup_column") or "value"
     # Avoid the word "name" in this hint. The parameter object has a field
     # called `name`, and a label like "customer name" led the model to put the
     # store it was looking up there instead of in `value`, overriding a
