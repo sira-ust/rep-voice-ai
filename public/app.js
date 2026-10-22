@@ -4,7 +4,7 @@
 // for a short-lived conversation token / signed URL and hands it to the SDK.
 
 import { Conversation } from "https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.25.0/+esm";
-import { renderVisual } from "/visuals.js";
+import { renderVisual, visualToText } from "/visuals.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -46,6 +46,7 @@ const el = {
   debugDetail: $("debugDetail"),
   debugCopy: $("debugCopy"),
   debugClear: $("debugClear"),
+  copyTranscript: $("copyTranscript"),
 };
 
 const state = {
@@ -490,13 +491,18 @@ async function startConversation() {
           // the rep start a new bubble.
           state.live.node = null;
           state.live.visuals = [];        // confirmed: they stay with this turn
+          // ElevenLabs' copy is what was actually spoken. Kept on the bubble
+          // beside the screen text, for "Copy conversation" -- a visit plan's
+          // summary is spoken, its details only shown.
           if (state.live.reply && state.live.reply.isConnected) {
+            state.live.reply.dataset.spoken = message;
             state.live.reply = null;
           } else if (state.streaming.node) {
             state.streaming.node.textContent = message;
+            state.streaming.node.dataset.spoken = message;
             state.streaming = { id: null, node: null, text: "" };
           } else {
-            addMessage(message, "ai");
+            addMessage(message, "ai").dataset.spoken = message;
           }
         }
         renderDebugStats();
@@ -812,6 +818,58 @@ el.debugDetail.addEventListener("click", () => {
 });
 
 renderDetailToggle();
+
+/**
+ * The conversation as plain text: each turn as spoken, and as it appeared on
+ * screen when that differs -- a visit plan speaks a summary and shows the
+ * whole plan, and both belong in what a rep pastes into an email.
+ */
+function transcriptText() {
+  const rep = el.repSelect && el.repSelect.selectedOptions[0] ? el.repSelect.selectedOptions[0].textContent : "";
+  const when = new Date().toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+  const out = [`U.S. Trading sales assistant${rep ? ` - ${rep}` : ""} - ${when}`];
+  for (const item of el.transcript.children) {
+    if (item.classList.contains("guide")) continue;
+    if (item.classList.contains("msg-user")) {
+      out.push("", `You: ${item.textContent.trim()}`);
+    } else if (item.classList.contains("msg-ai")) {
+      const screen = (item.dataset.raw || item.textContent || "").trim();
+      const spoken = (item.dataset.spoken || "").trim();
+      const flat = (s) => s.replace(/[*=]/g, "").replace(/\s+/g, " ").trim();
+      if (spoken && flat(spoken) !== flat(screen)) {
+        out.push("", `Agent (spoken): ${spoken}`, "", `Agent (on screen):\n${screen}`);
+      } else {
+        out.push("", `Agent: ${screen || spoken}`);
+      }
+    } else if (item.classList.contains("msg-visual") && item.visual) {
+      out.push("", "On screen:", visualToText(item.visual));
+    } else if (item.classList.contains("msg-system")) {
+      out.push("", `(${item.textContent.trim()})`);
+    }
+  }
+  return out.join("\n");
+}
+
+el.copyTranscript.addEventListener("click", async () => {
+  const text = transcriptText();
+  try {
+    await navigator.clipboard.writeText(text);
+    el.copyTranscript.textContent = "Copied";
+  } catch {
+    // No clipboard permission (an older handheld browser): a hidden text box
+    // and the old copy command still work there.
+    const box = document.createElement("textarea");
+    box.value = text;
+    box.style.position = "fixed";
+    box.style.opacity = "0";
+    document.body.appendChild(box);
+    box.select();
+    const ok = document.execCommand && document.execCommand("copy");
+    box.remove();
+    el.copyTranscript.textContent = ok ? "Copied" : "Copy failed";
+  }
+  setTimeout(() => (el.copyTranscript.textContent = "Copy conversation"), 1500);
+});
 
 el.debugCopy.addEventListener("click", async () => {
   const text = logLines.join("\n");

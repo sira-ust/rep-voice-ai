@@ -1,0 +1,83 @@
+  call id: EpqdmiFRUEqWWVHwpXVyLw
+
+You: Seeing Hmong Legacy next week. What should I pitch them?
+
+Agent (spoken by ElevenLabs): Let me check. Hmong Legacy Market LLC in Madison is a lapsed account, as they haven't ordered in 70 days. Since Hmong New Year is just 9 days away, you might want to pitch Df Thai Sweet Rice (10X5Lbs) or Tas Coconut Milk Drink   Can for their sticky rice. You could also mention the Alum Hmong Steamer (28Cm) is 17% cheaper than they last paid. The full plan is on your screen.
+
+Agent (on screen):
+Let me check. **Hmong Legacy Market LLC** in Madison is a lapsed account, as they haven't ordered in 70 days. Since **Hmong New Year** is just 9 days away, you might want to pitch **Df Thai Sweet Rice (10X5Lbs)** or **Tas Coconut Milk Drink   Can** for their sticky rice. You could also mention the **Alum Hmong Steamer (28Cm)** is 17% cheaper than they last paid.
+
+The full plan is on your screen.
+
+On screen (card):
+Visit plan: Hmong Legacy Market LLC, Madison
+FOR THIS VISIT
+  Hmong New Year is 9 days away
+    - Df Thai Sweet Rice (10X5Lbs): bought 13 times, last on Jul 2, 2026; The essential base for many traditional Hmong celebratory desserts; stores that celebrate it buy 1.8 times their
+    - Tas Coconut Milk Drink   Can: bought 20 times, last on Aug 8, 2025; Used to create sweet, creamy rice puddings and desserts; stores that celebrate it buy 1.2 times their usual amou
+  Cheaper than they last paid
+    - Alum Hmong Steamer (28Cm): bought 16 times, last on Mar 6, 2026; in the next 5 weeks they usually buy 2.8 times their normal amount (2019-2025); last paid $57.54 a case, $48 now
+  Lapsed account
+    - Mochiko Sweet Rice Flour: bought 3 times, last on Mar 28, 2022; last paid $62.87 a case, $76 now (21% more); in stock.
+    - Jhc Laab Seasoning Mix: bought 3 times, last on Oct 2, 2025; last paid $59.01 a case, $65 now (10% more); we were out of stock for 10 days around when they were due (Jul 22, 
+MORE IDEAS (collapsed)
+  - Hmong New Year (Oct 31, 2026)
+  - Their season: they buy more of these in the next 5 weeks
+  - Cheaper than they last paid
+  - On promotion
+  - Back in stock
+  - Our stock is running low: order now
+  - Similar stores buy it; they never have
+  - Our own brand instead
+  - Instead of what we are out of
+  - Buying less lately
+  - Due now
+  - Win-backs
+  - New or trending in what they buy
+  - Staples
+
+You: Why haven't they ordered in so long?
+
+Agent (spoken by ElevenLabs): They've likely slowed down because we were out of stock on several items they buy, like the Alum Cooking Pot (40Cm) and Dragonfly Fermented Fish Sauce Super, right when they were due to order. Prices have also risen by 15% or more on 7 of their items since they last paid. Would you like to see the specific items they are buying less of, or should we look at what's back in stock?
+
+Agent (on screen):
+They've likely slowed down because we were out of stock on several items they buy, like the Alum Cooking Pot (40Cm) and Dragonfly Fermented Fish Sauce Super, right when they were due to order. Prices have also risen by 15% or more on 7 of their items since they last paid. Would you like to see the specific items they are buying less of, or should we look at what's back in stock?
+
+You: Anything in the news that affects what they buy?
+
+Agent (spoken by ElevenLabs): Let me check. Reuters reports that the FAO Food Price Index was up 5.8% compared to last year, driven primarily by crop-based groups. There is also news about China proposing an overhaul of its Food Safety Law, which could impact traceability for ingredient suppliers. Would you like to know if any of the items they buy are seeing price increases, or should we look at what's currently on promotion?
+
+Agent (on screen):
+Let me check. Reuters reports that the FAO Food Price Index was up 5.8% compared to last year, driven primarily by crop-based groups. There is also news about China proposing an overhaul of its Food Safety Law, which could impact traceability for ingredient suppliers. Would you like to know if any of the items they buy are seeing price increases, or should we look at what's currently on promotion?
+
+You: What about Viet Hoa tomorrow? Is anything running low, and do we have our own brand for what they buy?
+
+Agent (spoken by ElevenLabs): Let me check. At Viet Hoa Market, LLC, we are running low on items like Df Laab Namtok Seasoning Mix and Mogu Mogu Nata De Coco Drink Watermelon Bottle. For our own brand, we can offer Df Hot Shrimp Noodle (Pkg) instead of Mama Shrimp Tom Yum Noodle, or Df Pork Rib Noodle (Pkg) instead of Mama ( Pork ) Noodle. The full plan is on your screen.
+
+Agent (on screen):
+Let me check. At **Viet Hoa Market, LLC**, we are running low on items like Df Laab Namtok Seasoning Mix and Mogu Mogu Nata De Coco Drink Watermelon Bottle. For our own brand, we can offer Df Hot Shrimp Noodle (Pkg) instead of Mama Shrimp Tom Yum Noodle, or Df Pork Rib Noodle (Pkg) instead of Mama ( Pork ) Noodle. The full plan is on your screen.
+
+On screen (card):
+Visit plan: Viet Hoa Market, LLC, Madison
+FOR THIS VISIT
+  Our stock is running low
+    - Df Laab Namtok Seasoning Mix: bought 115 times, last on Sep 8, 2026; $31 a case; our stock is down to 1% of its usual level -- worth ordering now; in stock.
+    - Mogu Mogu Nata De Coco Drink Watermelon  Bottle: bought 7 times, last on Jul 13, 2026; last paid $20 a case, $21 now (5% more); our stock is down to 1% of its usual level -- worth ordering now; in st
+  Our own brand instead
+    - Df Hot Shrimp Noodle (Pkg): $23 a case; our own brand, in place of Mama Shrimp Tom Yum Noodle, which they buy (ours $23 for a case of 6; theirs $72 for a case of 6 -- compare wha
+    - Df Pork Rib Noodle (Pkg): $23 a case; our own brand, in place of Mama ( Pork ) Noodle, which they buy (ours $23 for a case of 6; theirs $72 for a case of 6 -- compare what is i
+MORE IDEAS (collapsed)
+  - Their season: they buy more of these in the next 5 weeks
+  - Cheaper than they last paid
+  - On promotion
+  - Back in stock
+  - Our stock is running low: order now
+  - Our own brand instead
+  - Instead of what we are out of
+  - Buying less lately
+  - Due now
+  - Win-backs
+  - New or trending in what they buy
+  - Staples
+
+  conversation: conv_4801m5gr1s3ce0tvj0vy80brxkgp 

@@ -78,7 +78,7 @@
       "grain": "full purchase history per account-item",
       "not_covered": "Due and overdue are judged against that account's own rhythm, not a company threshold, so a quarterly buyer is not overdue after a month. Value is subject to the same late-2026 pricing gap as invoices."
     },
-    "ust_databricks.ust_reporting.mart_account_item_opportunities": {
+    "ust_databricks.ust_reporting.mart_account_item_pitch": {
       "label": "What to pitch an account",
       "about": "A ranked list of items to raise with an account, each carrying the reason it made the list -- due to reorder, stopped buying, on promotion, peers buy it, or new and featured -- and the evidence behind it, with stock and promotion terms.",
       "grain": "ranked per account, rebuilt with the pipeline",
@@ -342,30 +342,49 @@
     },
     {
       "name": "lookup_pitch_list",
-      "table": "ust_databricks.ust_reporting.mart_account_item_opportunities",
+      "table": "ust_databricks.ust_reporting.mart_account_item_pitch",
       "lookup_column": "customer_key",
       "match": "exact",
       "columns": [
         "item_no",
         "owner_rep_name",
+        "customer_name",
+        "city",
         "item_label",
+        "item_category_name",
         "opportunity_reason",
+        "purchase_pattern",
         "is_evidence_based",
-        "opportunity_evidence",
+        "times_purchased",
+        "last_purchase_date",
+        "median_days_between_purchases",
         "days_overdue",
+        "last_paid_unit_price",
+        "unit_price",
+        "price_unit",
+        "price_change_pct",
         "is_in_stock",
         "shippable_qty",
+        "stock_is_known",
+        "stock_days_checked",
+        "oos_days_when_due",
+        "first_oos_when_due",
+        "last_oos_when_due",
+        "backorder_requests",
+        "last_backorder_date",
+        "backorder_qty",
         "is_on_promotion",
+        "promo_price",
         "promo_buy_qty",
         "promo_free_qty",
         "promo_end_date",
-        "unit_price"
+        "suggested_order"
       ],
-      "order_by": "opportunity_rank",
-      "limit": 6,
+      "order_by": "suggested_order",
+      "limit": 10,
       "value_label": "account key being asked about",
       "example": "RED005",
-      "description": "What to walk in and TALK ABOUT with ONE account: items ranked by opportunity, each with the reason it made the list and the evidence behind it. Use when a rep asks what to sell, pitch, recommend or bring up with a store. Every row says whether it is evidence based -- built on that account's own buying -- or only a suggestion, and those two must be said differently.",
+      "description": "What to walk in and TALK ABOUT with ONE account: up to ten items, each with the facts behind it, for you to choose from. Use when a rep asks what to sell, pitch, recommend or bring up with a store. Each row has in_words -- answer from it. Rows come regular items first (bought often and due again), then lapsed ones (bought before, stopped), then suggestions the account has never bought. Lead with two or three, chosen for this visit: a regular item they are due for is the easy start; a lapsed item is worth raising when there is a reason -- we ran out when they were due, they asked for it while we were out, the price has moved, or the season or a festival suits it. Whenever what they last paid differs from the price now, say both, as given. Never call a lapsed item 'due' or read out how many days overdue it is: say when they last bought it. A suggestion must be said as a suggestion, never as something they buy.",
       "subject": "What to sell",
       "sample_questions": [
         "What should I sell Red Apple Market?",
@@ -382,10 +401,12 @@
         "title": "What to pitch",
         "columns": [
           "item_label",
-          "opportunity_reason",
-          "days_overdue",
-          "is_in_stock",
-          "unit_price"
+          "purchase_pattern",
+          "last_purchase_date",
+          "last_paid_unit_price",
+          "unit_price",
+          "oos_days_when_due",
+          "is_in_stock"
         ]
       }
     },

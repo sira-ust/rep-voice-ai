@@ -1,0 +1,162 @@
+U.S. Trading sales assistant - Ryan Tran - Oct 22, 2026 09:26 AM
+
+You: I'm stopping by Viet Hoa Market tomorrow. Anything I should bring up?
+
+Agent (spoken, 10s): For Viet Hoa Market in Madison, you might want to mention that several items they buy are back in stock, like the Pink Lotus Calrose Rice and Tas Fruit Juice Drink Lychee Can. It's also a good time to pitch Fish Sauce Trey Kanchanhchras, as the price is down 43% since they last paid. I've put a few more ideas on your screen, including some promotions and items where our stock is running low.
+
+Agent (on screen):
+For **Viet Hoa Market** in Madison, you might want to mention that several items they buy are back in stock, like the **Pink Lotus Calrose Rice** and **Tas Fruit Juice Drink Lychee Can**. It's also a good time to pitch **Fish Sauce Trey Kanchanhchras**, as the price is down 43% since they last paid.
+
+I've put a few more ideas on your screen, including some promotions and items where our stock is running low.
+
+On screen:
+Visit plan: Viet Hoa Market, LLC, Madison
+
+FOR THIS VISIT
+
+  Back in stock
+    - Pink Lotus Calrose Rice: bought 38 times, last on Oct 13, 2026; last paid $27 a case, $28 now (4% more); U.S. Trading was out of it from Sep 22, 2026 to Sep 22, 2026; back in stock now; in stock.
+    - Tas Fruit Juice Drink Lychee  Can: bought 9 times, last on Sep 18, 2026; $18 a case; U.S. Trading was out of it from Sep 25, 2026 to Oct 19, 2026; back in stock now; in stock.
+
+  Cheaper than last time
+    - Fish Sauce Trey Kanchanhchras: bought 1 time, last on Mar 6, 2026; last paid $63 a case, $36 now (43% less); in stock.
+
+  On promotion
+    - Cozy Vietnamese Tea Lychee  Bottle: bought 6 times, last on Sep 18, 2026; $20 a case; on promotion: buy 5 get 1 free until Oct 31, 2026; in stock.
+    - Cozy Pink Guava Tea: bought 6 times, last on Sep 8, 2026; $20 a case; on promotion: buy 5 get 1 free until Oct 31, 2026; in stock.
+
+  Our stock is running low
+    - Mogu Mogu Nata De Coco Drink Watermelon  Bottle: bought 7 times, last on Jul 13, 2026; last paid $20 a case, $21 now (5% more); our stock is down to 1% of its usual level -- worth ordering now; in stock.
+    - Mama Shrimp Tom Yum Noodle: bought 21 times, last on Feb 20, 2026; last paid $69 a case, $72 now (4% more); our stock is down to 2% of its usual level -- worth ordering now; in stock.
+
+MORE IDEAS (collapsed on screen)
+
+  Their season: they buy more of these in the next 5 weeks
+    - Jhc Sweet Radish (Strip): bought 9 times, last on Jan 8, 2026; in the next 5 weeks they usually buy 10.2 times their normal amount (2019-2025); last paid $60 a case, $65 now (8% more); in stock.
+    - Knorr Chicken Bouillon: bought 47 times, last on Nov 13, 2025; in the next 5 weeks they usually buy 3.5 times their normal amount (2019-2025); $31 an innerpack; in stock.
+    - Df Rice Stick W/Padthai Sauce: bought 10 times, last on Jun 18, 2025; in the next 5 weeks they usually buy 3.0 times their normal amount (2019-2025); last paid $41 a case, $42 now (2% more); in stock.
+    - Dh Beanthread In Net (Sp): bought 64 times, last on Sep 3, 2024; in the next 5 weeks they usually buy 2.9 times their normal amount (2019-2025); last paid $125 a case, $135 now (8% more); in stock.
+    - Df Sour Bbs (Can): bought 76 times, last on Apr 2, 2026; in the next 5 weeks they usually buy 2.4 times their normal amount (2019-2025); $36 a case; in stock.
+    - Df Tapioca Flour: bought 52 times, last on Sep 18, 2026; in the next 5 weeks they usually buy 2.2 times their normal amount (2019-2025); $45 a case; in stock.
+    - Df Tamarind Concentrate: bought 80 times, last on Oct 6, 2026; in the next 5 weeks they usually buy 2.2 times their normal amount (2019-2025); $54 a case; in stock.
+    - Df Bamboo Shoot (Tip): bought 103 times, last on Aug 19, 2026; in the next 5 weeks they usually buy 2.2 times their normal amount (2019-2025); $48 a case; in stock.
+
+  Cheaper than they last paid
+    - Fish Sauce Trey Kanchanhchras: bought 1 time, last on Mar 6, 2026; last paid $63 a case, $36 now (43% less); in stock.
+    - Fish Sauce Keto: bought 1 time, last on Mar 6, 2026; last paid $57 a case, $48 now (16% less); in stock.
+    - Jhc Lychee In Syrup: bought 4 times, last on Jan 8, 2026; last paid $67 a case, $58 now (13% less); in stock.
+    - Df Bamboo Shoot (Tip): bought 57 times, last on Jul 23, 2026; last paid $36 a case, $32 now (11% less); in stock.
+    - Dragonfly Fermented Fish Sauce Phu Quoc Large: bought 15 times, last on May 14, 2026; last paid $45 a case, $40 now (11% less); in stock.
+    - Ns Kpop  Shin 16: bought 3 times, last on Jan 8, 2026; last paid $18 a case, $16 now (11% less); in stock.
+    - Fz 30/40 Whole White Shrimp: bought 2 times, last on Jan 8, 2026; last paid $100 a case, $89 now (11% less); in stock.
+    - Chaokoh Coconut Milk (M): bought 34 times, last on Nov 13, 2025; in the next 5 weeks they usually buy 2.0 times their normal amount (2019-2025); last paid $40 a case, $36 now (10% less); in stock.
+
+  On promotion
+    - Cozy Vietnamese Tea Lychee  Bottle: bought 6 times, last on Sep 18, 2026; $20 a case; on promotion: buy 5 get 1 free until Oct 31, 2026; in stock.
+    - Cozy Pink Guava Tea: bought 6 times, last on Sep 8, 2026; $20 a case; on promotion: buy 5 get 1 free until Oct 31, 2026; in stock.
+    - Fz Peeled Cassava: bought 2 times, last on Oct 13, 2026; $80 a case; on promotion until Oct 31, 2026; in stock.
+    - Sting Energy Drink Can: bought 6 times, last on Sep 18, 2026; last paid $25 a case, $24 now (4% less); on promotion: buy 10 get 1 free until Oct 31, 2026; in stock.
+    - Cozy Vietnamese Tea Peach Lemongrass  Bottle: bought 5 times, last on Sep 8, 2026; $20 a case; on promotion: buy 5 get 1 free until Oct 31, 2026; in stock.
+    - Fanta Orange Flavor: bought 3 times, last on Aug 19, 2026; last paid $26.68 a case, $32 now (20% more); on promotion: buy 5 get 1 free until Oct 31, 2026; in stock.
+    - Joyluck Pho Spice Mix: bought 3 times, last on Apr 2, 2026; $150 a case; on promotion until Oct 31, 2026; in stock.
+    - Fz Animal Shaped Steamed Buns: bought 2 times, last on Apr 2, 2026; $45 a case; on promotion: buy 5 get 1 free until Oct 31, 2026; in stock.
+
+  Back in stock
+    - Cheese & Rice Cake Corn Dog: bought 8 times, last on Oct 13, 2026; $80 a case; U.S. Trading was out of it from Sep 16, 2026 to Sep 17, 2026; back in stock now; in stock.
+    - Pink Lotus Calrose Rice: bought 38 times, last on Oct 13, 2026; last paid $27 a case, $28 now (4% more); U.S. Trading was out of it from Sep 22, 2026 to Sep 22, 2026; back in stock now; in stock.
+    - Tas Fruit Juice Drink Lychee  Can: bought 9 times, last on Sep 18, 2026; $18 a case; U.S. Trading was out of it from Sep 25, 2026 to Oct 19, 2026; back in stock now; in stock.
+    - Jhc Sour Bbs (Strip): bought 57 times, last on Aug 7, 2026; $56 a case; U.S. Trading was out of it from Sep 4, 2026 to Oct 5, 2026; back in stock now; in stock.
+    - Jhc Ground Chili/Garlic: bought 96 times, last on Oct 13, 2026; in the next 5 weeks they usually buy 1.3 times their normal amount (2019-2025); $82 a case; U.S. Trading was out of it from Sep 29, 2026 to Oct 3, 2026; back in stock now; in stock.
+    - Tas Nata De Coco (Cube): bought 15 times, last on Oct 13, 2026; $36 a case; U.S. Trading was out of it from Sep 1, 2026 to Sep 10, 2026; back in stock now; in stock.
+    - Df Super Hot Roasted Chili Oil: bought 51 times, last on Oct 6, 2026; $132 a case; U.S. Trading was out of it from Sep 15, 2026 to Sep 23, 2026; back in stock now; in stock.
+    - Df Instant Noodle(Banh Pho): bought 101 times, last on Sep 18, 2026; last paid $50 a case, $48 now (4% less); U.S. Trading was out of it from Oct 9, 2026 to Oct 12, 2026; back in stock now; in stock.
+
+  Our stock is running low: order now
+    - Df Laab Namtok Seasoning Mix: bought 115 times, last on Sep 8, 2026; $31 a case; our stock is down to 1% of its usual level -- worth ordering now; in stock.
+    - Mogu Mogu Nata De Coco Drink Watermelon  Bottle: bought 7 times, last on Jul 13, 2026; last paid $20 a case, $21 now (5% more); our stock is down to 1% of its usual level -- worth ordering now; in stock.
+    - Df Bamboo Shoot (Strip)(S): bought 34 times, last on Jan 8, 2026; $36 a case; our stock is down to 1% of its usual level -- worth ordering now; in stock.
+    - Mama Shrimp Tom Yum Noodle: bought 21 times, last on Feb 20, 2026; last paid $69 a case, $72 now (4% more); our stock is down to 2% of its usual level -- worth ordering now; in stock.
+    - Double Dragon Boat Noodle: bought 2 times, last on Oct 13, 2026; $50 a case; our stock is down to 3% of its usual level -- worth ordering now; in stock.
+    - Ojo Butter Coconut Cookies: bought 50 times, last on Sep 8, 2026; $35 a case; our stock is down to 3% of its usual level -- worth ordering now; in stock.
+    - Fz Df Piacake Pandan Eggyolk: bought 2 times, last on Jan 8, 2026; $112 a case; our stock is down to 4% of its usual level -- worth ordering now; in stock.
+    - Fz Banana Leaves: bought 3 times, last on Oct 13, 2026; last paid $47 a case, $49 now (4% more); our stock is down to 6% of its usual level -- worth ordering now; in stock.
+
+  Our own brand instead
+    - Df Hot Shrimp Noodle (Pkg): $23 a case; our own brand, in place of Mama Shrimp Tom Yum Noodle, which they buy (ours $23 for a case of 6; theirs $72 for a case of 6 -- compare what is in each before quoting a saving); in stock.
+    - Df Pork Rib Noodle (Pkg): $23 a case; our own brand, in place of Mama ( Pork ) Noodle, which they buy (ours $23 for a case of 6; theirs $72 for a case of 6 -- compare what is in each before quoting a saving); in stock.
+    - Df Ground Red Chili: $36 a case; our own brand, in place of Jhc Ground Chili/Garlic, which they buy (ours $36 for a case of 6; theirs $82 for a case of 24 -- compare what is in each before quoting a saving); in stock.
+    - Df (Can) Fried Onion Soup: $18 a case; our own brand, in place of Jhc Fried Onion (L), which they buy (ours $18 for a case of 12; theirs $54 for a case of 12 -- compare what is in each before quoting a saving); in stock.
+    - Df Fish Sauce: $26 a case; our own brand, in place of Chuon Chuon Fish Sauce, which they buy (ours $26 for a case of 12; theirs $48 for a case of 12 -- compare what is in each before quoting a saving); in stock.
+    - Df Bamboo Shoot (Strip): $32 a case; our own brand, in place of 999 Baby Bamboo Shoot (L), which they buy (ours $32 for a case of 1; theirs $49 for a case of 12 -- compare what is in each before quoting a saving); in stock.
+    - Df Palm Sugar Paste: $50 a case; on promotion until Oct 31, 2026; our own brand, in place of Jhc Palm Sugar (Pieces), which they buy (ours $50 for a case of 6; theirs $64 for a case of 36 -- compare what is in each before quoting a saving); in stock.
+    - Df Chicken Seasoning Mix: $56 a case; our own brand, in place of Jhc Laab Seasoning Mix, which they buy (ours $56 for a case of 4; theirs $65 for a case of 24 -- compare what is in each before quoting a saving); in stock.
+
+  Instead of what we are out of
+    - Hb Seaweed Laver (L): bought 110 times, last on Sep 18, 2026; $34 a case; in place of Hb Seaweed Laver (Sesame Oil), which they buy and we are out of (ours $34 for a case of 8; theirs $37 for a case of 6 -- compare what is in each before quoting a saving); in stock.
+    - Df/Jhc Sour Bbs Strip/Chili: bought 82 times, last on Aug 7, 2026; $56 a case; in place of Jhc Sour Bbs (Sliced), which they buy and we are out of (ours $56 for a case of 36; theirs $56 for a case of 36 -- compare what is in each before quoting a saving); in stock.
+    - Dfly Strawberry Pudding: bought 44 times, last on Sep 18, 2026; $31 a case; in place of Dfly Assorted Pudding, which they buy and we are out of (ours $31 for a case of 24; theirs $31 for a case of 24 -- compare what is in each before quoting a saving); in stock.
+    - Df Laab Namtok Seasoning Mix: bought 115 times, last on Sep 8, 2026; $31 a case; in place of Df Laab Mix In Can (L), which they buy and we are out of (ours $31 for a case of 36; theirs $96 for a case of 12 -- compare what is in each before quoting a saving); in stock.
+    - Mogu Mogu Nata De Coco Drink Mango  Bottle: bought 39 times, last on Jul 13, 2026; last paid $20 a case, $21 now (5% more); in place of Pororo Mango Flavor Drink, which they buy and we are out of (ours $21 for a case of 24; theirs $28 for a case of 24 -- compare what is in each before quoting a saving); in stock.
+    - Fz Jhc Young Coconut Juice: bought 4 times, last on Jul 13, 2026; $42 a case; in place of Df Fz Young Coconut Slice, which they buy and we are out of (ours $42 for a case of 24; theirs $60 for a case of 36 -- compare what is in each before quoting a saving); in stock.
+    - Df Pudding (Big) Mango: bought 25 times, last on Sep 8, 2026; $29 a case; in place of Dfly Mango Pudding, which they buy and we are out of (ours $29 for a case of 12; theirs $31 for a case of 24 -- compare what is in each before quoting a saving); in stock.
+    - Sting Energy Drink Can: bought 6 times, last on Sep 18, 2026; last paid $25 a case, $24 now (4% less); on promotion: buy 10 get 1 free until Oct 31, 2026; in place of Sting Yellow Energy Drink(Can), which they buy and we are out of (ours $24 for a case of 24; theirs $26 for a case of 24 -- compare what is in each before quoting a saving); in stock.
+
+  Buying less lately
+    - Jhc Fried Onion (L): bought 15 times, last on Apr 2, 2026; last paid $50 a case, $54 now (8% more); in the last 6 months they bought 0% of what they bought in the 6 before; in stock.
+    - Fz Toddy Palm Cake Dessert: bought 4 times, last on Apr 2, 2026; $75 a case; in the last 6 months they bought 0% of what they bought in the 6 before; in stock.
+    - Kung Fu Noodle Beef Flavor: bought 6 times, last on Feb 20, 2026; $15 a case; in the last 6 months they bought 0% of what they bought in the 6 before; in stock.
+    - Mama Shrimp Tom Yum Noodle: bought 21 times, last on Feb 20, 2026; last paid $69 a case, $72 now (4% more); in the last 6 months they bought 0% of what they bought in the 6 before; in stock.
+    - Fz Sh Sliced Pork Skin: bought 4 times, last on Feb 20, 2026; $55 a case; in the last 6 months they bought 0% of what they bought in the 6 before; in stock.
+    - Ns Kpop  Shin 16: bought 3 times, last on Jan 8, 2026; last paid $18 a case, $16 now (11% less); in the last 6 months they bought 0% of what they bought in the 6 before; in stock.
+    - Df Guilin Family Pack (Thin): bought 116 times, last on Oct 13, 2026; $75 a case; in the last 6 months they bought 15% of what they bought in the 6 before; in stock.
+    - Df Instant Noodle(Banh Pho): bought 101 times, last on Sep 18, 2026; last paid $50 a case, $48 now (4% less); in the last 6 months they bought 20% of what they bought in the 6 before; in stock.
+
+  Due now
+    - Chao Thai Cocont Pwdr (Bag): bought 4 times, last on Jan 29, 2021; usually about every 1510 days, so due again; last paid $52 a case, $62 now (19% more); in stock.
+    - Df Chicken Batter Mix (Org): bought 4 times, last on Oct 31, 2021; usually about every 1274 days, so due again; $45 a case; in stock.
+    - G7 Instant Coffee 3 In 1  20 Pkts Bag: bought 4 times, last on Oct 17, 2023; usually about every 586 days, so due again; last paid $72 a case, $88 now (22% more); in stock.
+    - 3 Ballerina Dieter'S Tea  30 Pkts Box: bought 5 times, last on Aug 25, 2023; usually about every 671 days, so due again; last paid $68 a case, $78 now (15% more); in stock.
+
+  Win-backs
+    - Honeybee Thai Tea Drink   Can: bought 3 times, last on Apr 15, 2020; last paid $12.50 a case, $20 now (60% more); in stock.
+    - Bean Vermicelli: bought 3 times, last on Aug 3, 2020; last paid $55 a case, $88 now (60% more); in stock.
+    - Speedy (Kit) #5 Drk Chsnt: bought 3 times, last on Oct 17, 2023; last paid $18 an innerpack, $20 now (11% more); in stock.
+    - China Slim Dieter'S Tea  18 Pkts Box: bought 3 times, last on Aug 25, 2023; last paid $98 a case, $100 now (2% more); in stock.
+
+  New or trending in what they buy
+    - Multi 5 Grain Rice: they have never bought it; they buy this category on 23 days a year; $48 a case; a new item; in stock.
+    - Global Deer Bun Tuoi Tay Do: they have never bought it; they buy this category on 23 days a year; $37 a case; a new item; in stock.
+    - Wei Chuan Dried Noodle(Med): they have never bought it; they buy this category on 23 days a year; $32 a case; a new item; in stock.
+    - Instant Vegetarian Pho(Bowl): they have never bought it; they buy this category on 23 days a year; $10 a case; a new item; in stock.
+    - Instant Thai Spicy Noodle(Bowl: they have never bought it; they buy this category on 23 days a year; $10 a case; a new item; in stock.
+    - Df Bean Thread Vermicelli: they have never bought it; they buy this category on 23 days a year; $75 a case; a new item; in stock.
+    - Maggi Seasoning Sauce (Dark): they have never bought it; they buy this category on 21 days a year; $36 a case; a new item; in stock.
+    - Maggi Seasoning Sauce (Mild): they have never bought it; they buy this category on 21 days a year; $34 a case; a new item; in stock.
+
+  Staples
+    - Hbb Rice Cracker (Xl): bought 117 times, last on Sep 18, 2026; $38 a case; in stock.
+    - Hbb Soft Flour Cake (L): bought 110 times, last on Sep 8, 2026; $66 a case; in stock.
+    - Df Bamboo Shoot (Tip): bought 103 times, last on Aug 19, 2026; in the next 5 weeks they usually buy 2.2 times their normal amount (2019-2025); $48 a case; in stock.
+    - Hbb Rice Cracker: bought 49 times, last on Oct 13, 2026; in the next 5 weeks they usually buy 1.5 times their normal amount (2019-2025); $32 a case; in stock.
+    - Cheese & Rice Cake Corn Dog: bought 8 times, last on Oct 13, 2026; $80 a case; in stock.
+    - Apple (Usa) Sweet Rice: bought 126 times, last on Oct 6, 2026; last paid $23 a case, $24 now (4% more); in stock.
+    - Pink Lotus Calrose Rice: bought 38 times, last on Oct 13, 2026; last paid $27 a case, $28 now (4% more); in stock.
+    - Df Inst Pho Pkt ( L )Big: bought 113 times, last on Sep 8, 2026; $68 a case; in stock.
+
+You: Do we have our own brand for anything they buy?
+
+Agent (spoken, 2s): Yes, you could suggest a few of our own brands. You could offer Df Hot Shrimp Noodle (Pkg) instead of the Mama Shrimp Tom Yum Noodle they've been buying less of, or Df (Can) Fried Onion Soup as an alternative to their usual Jhc Fried Onion. I've listed the other own-brand options for them on your screen. Would you like to know more about the pricing for any of these?
+
+Agent (on screen):
+Yes, you could suggest a few of our own brands. You could offer **Df Hot Shrimp Noodle (Pkg)** instead of the Mama Shrimp Tom Yum Noodle they've been buying less of, or **Df (Can) Fried Onion Soup** as an alternative to their usual Jhc Fried Onion.
+
+I've listed the other own-brand options for them on your screen. Would you like to know more about the pricing for any of these?
+
+You: Is the DF ground red chili cheaper for them?
+
+Agent (spoken, 2s): I can't say for sure if the Df Ground Red Chili is cheaper. Because the case sizes are different from the Jhc brand, there's no direct saving I can quote. Would you like me to check the stock levels for that item?
+
+Agent (on screen):
+I can't say for sure if the **Df Ground Red Chili** is cheaper. Because the case sizes are different from the Jhc brand, there's no direct saving I can quote.
+
+Would you like me to check the stock levels for that item?

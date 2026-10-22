@@ -972,6 +972,36 @@ input[type="range"]::-moz-range-thumb {
 .vline-axis { font-size: 9.5px; fill: var(--text-2); font-family: var(--font); }
 
 /* table: scrolls sideways inside the card, never the page */
+.transcript-tools {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 14px 0;
+  background: var(--bg);
+}
+
+/* Visit plan: every section the server built, the agent's lead picks marked. */
+.vplan-note { margin: 0 0 8px; font-size: 12px; color: var(--text-2); }
+.vplan-featured { border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 8px; padding: 8px 10px; }
+.vplan-kicker { margin: 0 0 4px; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
+.vplan-featured .vplan-items li.lead { background: transparent; padding-left: 8px; }
+.vplan-more { margin-top: 10px; }
+.vplan-more > summary { cursor: pointer; font-size: 12.5px; font-weight: 650; color: var(--pda-navy); padding: 4px 0; }
+.vplan-more[open] > summary { margin-bottom: 4px; }
+.vplan-section + .vplan-section { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+.vplan-head { margin: 0 0 4px; font-size: 12.5px; font-weight: 650; color: var(--pda-navy); }
+.vplan-dish { margin: 6px 0 2px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+.vplan-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.vplan-items li { font-size: 12.5px; padding-left: 8px; border-left: 3px solid transparent; }
+.vplan-items li.lead { border-left-color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 3px 6px 3px 8px; }
+.vplan-items li.warn { opacity: 0.7; }
+.vplan-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.vplan-detail { color: var(--text-2); font-size: 12px; line-height: 1.35; }
+.vplan-tag {
+  font-size: 10.5px; font-weight: 700; color: var(--accent);
+  border: 1px solid var(--accent); border-radius: 999px; padding: 0 6px;
+}
+.vplan-tag-warn { color: var(--warn-text); border-color: var(--warn); }
+
 .vtable-wrap { overflow-x: auto; }
 .vtable { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 .vtable th {

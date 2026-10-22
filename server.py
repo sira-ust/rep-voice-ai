@@ -187,9 +187,9 @@ LLM_UPSTREAM_KEY = os.environ.get("LLM_UPSTREAM_API_KEY", "").strip()
 LLM_UPSTREAM_USER_AGENT = os.environ.get("LLM_UPSTREAM_USER_AGENT", "").strip()
 LLM_PROXY_SECRET = os.environ.get("LLM_PROXY_SECRET", "").strip()
 try:
-    LLM_PROXY_MAX_ROUNDS = max(1, int(os.environ.get("LLM_PROXY_MAX_TOOL_ROUNDS", "3") or 3))
+    LLM_PROXY_MAX_ROUNDS = max(1, int(os.environ.get("LLM_PROXY_MAX_TOOL_ROUNDS", "4") or 4))
 except ValueError:
-    LLM_PROXY_MAX_ROUNDS = 3
+    LLM_PROXY_MAX_ROUNDS = 4
 # How many times to ask again when the model returns an empty turn. Two is
 # enough: the failure is intermittent rather than sticky, and every retry is
 # another few seconds of a caller waiting.
@@ -309,6 +309,7 @@ def with_evidence(call: str, messages: list) -> list:
     if not kept:
         return messages
     out = []
+    stored = len(kept)
     for message in messages:
         if message.get("role") == "assistant" and isinstance(message.get("content"), str):
             said = _flat(message["content"])
@@ -318,6 +319,12 @@ def with_evidence(call: str, messages: list) -> list:
                     kept.remove(item)
                     break
         out.append(message)
+    # A turn's lookups that find no reply to sit beside are lost to the model,
+    # which then answers follow-ups from memory -- the one failure here that
+    # produces confident wrong numbers.
+    if kept:
+        sys.stderr.write("  EVIDENCE %d of %d earlier turn(s) not matched: %s\n"
+                         % (len(kept), stored, " | ".join(repr(i["key"][:40]) for i in kept)))
     return out
 
 
@@ -385,7 +392,7 @@ from the same text separately, so write it to be read:
 - ==Highlight== the one thing the rep must not miss, at most once per reply.
 - Three or more items: a short list, one per line, each starting with "- ".
 - Nothing else: no headings, tables, links, code or emoji -- apart from the
-  visual block below.
+  visual block below, and a visit plan's plan block.
 
 Keep it as short as you would say it. The formatting helps the eye; it is not
 a reason to write more.
@@ -445,6 +452,13 @@ Write it after your reply, on lines of its own, exactly in this form:
 
 The block is not spoken. Never read it out or describe it; you may say
 "I've put them on a map" or "they're on your screen".
+
+## Visit plans
+
+When lookup_visit_plan has run this turn, the plan goes to the rep's screen by
+itself, built from your plan block: your angles first, every other idea below
+them. Write no visual block. Your reply is the spoken summary of your angles,
+briefly, followed by the plan block its before_you_answer describes.
 """
 
 
@@ -759,6 +773,1017 @@ def drive_words(route: dict, from_place: str, to_place: str) -> str:
         "%d minutes" % mins if mins else ""]))
     return ("From %s to %s is about %d miles by road, about %s of driving without traffic."
             % (from_place, to_place, route["miles"], took))
+
+
+# ------------------------------------------------------------------ web search
+#
+# The one lookup that leaves our own data: Tavily, for what the warehouse
+# cannot know -- news, when a festival falls this year, what a product is for.
+# Never for our prices, stock or accounts. Whatever goes in the query goes to
+# an outside company, so store and rep names the conversation has turned up
+# are taken out before it leaves. Like the road route, a search that has not
+# come back in time is given up on: a slow network costs one sentence, not the
+# reply. Without TAVILY_API_KEY the tool is simply not offered.
+
+TAVILY_URL = "https://api.tavily.com/search"
+SEARCH_DEADLINE = 5.0
+SEARCH_BACKOFF = 120
+SEARCH_TTL = 1800
+SEARCH_MAX_CHARS = 600          # per result: enough to answer from, little to wade through
+_search_lock = threading.Lock()
+_search_cache: dict[str, dict] = {}
+_search_down_until = 0.0
+
+NO_SEARCH = ("The web search did not run -- it timed out, so nothing was searched. Say you "
+             "could not check the web just now (never that you found nothing, or that "
+             "there is nothing on), and answer what you can from our own data.")
+
+WEB_SEARCH_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "web_search",
+        "description": (
+            "Search the internet for what our own data cannot know: news (tariffs, "
+            "shortages, recalls, a price rise on rice or cooking oil), when a holiday "
+            "or festival falls this year and what people buy for it, what a product is "
+            "or how it is used. Use it only when our lookups cannot answer and the "
+            "answer would help the rep sell. NEVER use it for our prices, stock, sales, "
+            "customers or reps -- those come only from the other lookups. NEVER put a "
+            "store's, customer's or rep's name in the search: search the topic. "
+            "Festivals and events fall on different dates in different cities, so for "
+            "one store's area put its city and state in the search, and only quote "
+            "dates for that place. The "
+            "result comes from the web, not from U.S. Trading: say where it came from "
+            "('Reuters says...'), keep it to a sentence or two, and if the results do "
+            "not answer the question, say you could not find it rather than guess."),
+        "parameters": {
+            "type": "object",
+            "required": ["value"],
+            "properties": {"value": {"type": "string", "description": (
+                "A short web search, 3 to 8 words, with the year for anything dated "
+                "and the city for anything local. For example Hmong New Year 2026 "
+                "Madison Wisconsin.")}},
+        },
+    },
+}
+
+# Row fields that name a store or a person. Cities stay: "rice prices
+# Chicago" gives nothing away.
+PRIVATE_FIELDS = ("customer_name", "customer_key", "owner_rep_name", "owner_rep", "rep_name", "address")
+_COMPANY_SUFFIX = re.compile(r"[\s,.]+(llc|inc|corp|co|ltd)\.?$", re.I)
+
+
+def search_key() -> str:
+    return os.environ.get("TAVILY_API_KEY", "").strip()
+
+
+def private_names(history: list, rep: str = "") -> set[str]:
+    """Every store, account key and rep name this conversation's lookups
+    returned -- the words that must not leave in a search."""
+    names = {rep} if rep else set()
+    for message in history:
+        if message.get("role") != "tool":
+            continue
+        try:
+            rows = json.loads(message.get("content") or "{}").get("rows") or []
+        except (ValueError, AttributeError):
+            continue
+        for row in rows:
+            for field in PRIVATE_FIELDS:
+                value = row.get(field) if isinstance(row, dict) else None
+                if isinstance(value, str) and len(value.strip()) >= 3:
+                    names.add(value.strip())
+                    # The rep says "Hmong Legacy Market", the row says "... LLC".
+                    names.add(_COMPANY_SUFFIX.sub("", value.strip()))
+    return {n for n in names if len(n) >= 3}
+
+
+def scrub_query(query: str, names: set[str]) -> str:
+    for name in sorted(names, key=len, reverse=True):
+        query = re.sub(re.escape(name), " ", query, flags=re.I)
+    return " ".join(query.split())
+
+
+def web_search(query: str, history: list, rep: str = "") -> str:
+    """One web search as JSON text for the model, within SEARCH_DEADLINE
+    seconds whatever the network does."""
+    global _search_down_until
+    key = search_key()
+    if not key:
+        return json.dumps({"error": "Web search is not set up. Say you cannot look that up."})
+    clean = scrub_query(query, private_names(history, rep))
+    if clean.lower() != " ".join(query.split()).lower():
+        sys.stderr.write("  SEARCH: took a store or rep name out of the query\n")
+    if len(clean) < 3:
+        return json.dumps({"error": ("Search for the topic, never a store or a person -- "
+                                     "for example 'Hmong New Year 2026 dates'.")})
+    cache_key = clean.lower()
+    with _search_lock:
+        hit = _search_cache.get(cache_key)
+        if hit and hit["at"] > time.time() - SEARCH_TTL:
+            return json.dumps(hit["result"])
+        if time.time() < _search_down_until:
+            return json.dumps({"error": NO_SEARCH})
+
+    box: list = []
+
+    def fetch() -> None:
+        # A failed DNS lookup comes back at once, and the next one usually
+        # works; one more try fits easily inside the deadline.
+        started = time.time()
+        found = _fetch_search(key, clean)
+        if found is None and time.time() - started < SEARCH_DEADLINE / 2:
+            found = _fetch_search(key, clean)
+        box.append(found)
+
+    worker = threading.Thread(target=fetch, daemon=True)
+    worker.start()
+    worker.join(SEARCH_DEADLINE)
+    if worker.is_alive() or not box or box[0] is None:
+        with _search_lock:
+            _search_down_until = time.time() + SEARCH_BACKOFF
+        sys.stderr.write("  SEARCH %s: no web search for the next %d min\n"
+                         % ("timed out after %.0fs" % SEARCH_DEADLINE if worker.is_alive() else "failed",
+                            SEARCH_BACKOFF // 60))
+        return json.dumps({"error": NO_SEARCH})
+    result = box[0]
+    with _search_lock:
+        if len(_search_cache) >= 256:
+            _search_cache.pop(next(iter(_search_cache)))
+        _search_cache[cache_key] = {"at": time.time(), "result": result}
+    return json.dumps(result)
+
+
+# A rule in the system prompt to "think about the calendar" did nothing: asked
+# what to pitch a Hmong store ten days before Hmong New Year, the model never
+# searched unless the rep said "holiday". The same reminder beside the rows,
+# at the moment it is choosing what to say, is one it acts on. It still
+# decides for itself whether anything is worth a search, and what.
+SEASON_CHECK_TOOLS = ("lookup_pitch_list",)
+SEASON_CHECK = (
+    "Before you answer, think like a seller about timing: is anything happening "
+    "in the next six weeks or so that should change this pitch -- a festival or "
+    "holiday for the community this store serves (its name and what it buys tell "
+    "you which), or news about what it buys? If there plausibly is, call "
+    "web_search now with the topic, the store's city and state, and the year, "
+    "then use what you find. If nothing plausibly applies, just answer.")
+
+
+def searched(history: list) -> bool:
+    """Whether this conversation has already been to the web."""
+    return any(c.get("function", {}).get("name") == "web_search"
+               for m in history for c in (m.get("tool_calls") or []))
+
+
+def with_season_check(result: str) -> str:
+    try:
+        payload = json.loads(result)
+    except ValueError:
+        return result
+    if not payload.get("rows"):
+        return result
+    payload["before_you_answer"] = SEASON_CHECK
+    return json.dumps(payload)
+
+
+def _fetch_search(key: str, query: str) -> dict | None:
+    """One Tavily request; web_search puts the deadline on it."""
+    import datetime
+    body = json.dumps({"query": query, "search_depth": "basic", "max_results": 3,
+                       "include_answer": True}).encode("utf-8")
+    req = urllib.request.Request(TAVILY_URL, data=body, method="POST", headers={
+        "Authorization": "Bearer " + key, "Content-Type": "application/json",
+        "Accept": "application/json", "User-Agent": "voiceAI-sales-assistant"})
+    try:
+        with urllib.request.urlopen(req, timeout=SEARCH_DEADLINE + 3) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        # The body says why (quota, bad key) and never echoes the key.
+        sys.stderr.write("  SEARCH failed: HTTP %d %s\n" % (exc.code, exc.read()[:200]))
+        return None
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        sys.stderr.write("  SEARCH failed: %s\n" % type(exc).__name__)
+        return None
+
+    results = []
+    for item in (data.get("results") or [])[:3]:
+        host = (urllib.parse.urlsplit(item.get("url") or "").hostname or "").removeprefix("www.")
+        text = " ".join((item.get("content") or "").split())
+        if len(text) > SEARCH_MAX_CHARS:
+            text = text[:SEARCH_MAX_CHARS].rsplit(" ", 1)[0] + "..."
+        results.append({k: v for k, v in (("title", item.get("title")), ("source", host),
+                                          ("published", item.get("published_date")),
+                                          ("text", text)) if v})
+    return {
+        "searched_for": query,
+        "searched_on": datetime.date.today().isoformat(),
+        "answer": data.get("answer") or "",
+        "results": results,
+        "note": ("From the web, not U.S. Trading's data. Say where it came from, and never "
+                 "use it for our prices, stock or accounts."),
+    }
+
+
+# ------------------------------------------------------------------ visit plans
+#
+# "What should I pitch them?" used to be answered from one ranked list of ten,
+# so the model could only pick from whatever a formula had put at the top --
+# and with a festival coming it reached for whatever sounded festive, usually a
+# lapsed item. Now the night's work (VISIT_PLAN_TABLE) arrives in sections, one
+# per reason to raise something, the store's community holidays come with it,
+# and check_store_product lets the model test its own holiday ideas against the
+# store's buying. The model decides what to lead with and speaks a summary; the
+# whole plan goes to the screen as a card built here from the rows, so nothing
+# the model leaves unsaid is lost.
+
+VISIT_PLAN_TABLE = os.environ.get(
+    "VISIT_PLAN_TABLE", "ust_databricks.ust_reporting.mart_account_visit_plan_dev").strip()
+HOLIDAYS_TABLE = os.environ.get(
+    "HOLIDAYS_TABLE", "ust_databricks.ust_reporting.ref_community_holidays").strip()
+HOLIDAY_DAYS_AHEAD = 42
+
+PLAN_SECTIONS = (
+    ("occasion", "For the occasion"),
+    ("season", "Their season: they buy more of these in the next 5 weeks"),
+    ("promo_ending", "Promotion ending this week"),
+    ("price_drop", "Cheaper than they last paid"),
+    ("promo", "On promotion"),
+    ("back_in_stock", "Back in stock"),
+    ("low_stock", "Our stock is running low: order now"),
+    ("peer_gap", "Similar stores buy it; they never have"),
+    ("own_brand", "Our own brand instead"),
+    ("alternative", "Instead of what we are out of"),
+    ("buying_less", "Buying less lately"),
+    ("due", "Due now"),
+    ("winback", "Win-backs"),
+    ("new_trending", "New or trending in what they buy"),
+    ("staple", "Staples"),
+)
+PLAN_ITEMS_TO_MODEL = 5     # per section, in the short version the model chooses from
+
+VISIT_GUIDE = (
+    "These sections are a menu of ideas, not a checklist. Choose the two to four angles "
+    "that matter most for THIS store right now, and skip the rest: what is urgent (a "
+    "holiday days away, a promotion ending, our stock running low), what rests on this "
+    "store's own buying rather than other stores', and what is easy to say yes to (a "
+    "price drop, something back in stock, our own brand for less). A store that has not "
+    "ordered in a long while is itself an angle. Raise each item for its own reason: a "
+    "win-back is a win-back, never a holiday item. If one of upcoming_holidays is "
+    "celebrated by the community this store serves and the occasion section is empty, "
+    "check two or three key ingredients with check_store_product, all in one go, before "
+    "recommending any. Then speak a short summary: one sentence per angle, naming the "
+    "item and the reason a rep would give, and say the rest is on their screen. Lead with "
+    "the reason to buy; a price rise is something to handle, never the reason to pitch. "
+    "Do not read lists aloud. End with your angles, item names exactly as they appear "
+    "above, on their own lines, like this:\n```plan\n"
+    "[{\"angle\": \"Hmong New Year is 9 days away\", \"items\": [\"Df Thai Sweet Rice (10X5Lbs)\"]},\n"
+    " {\"angle\": \"Cheaper than last time\", \"items\": [\"Alum Hmong Steamer (28Cm)\"]}]\n```")
+
+VISIT_PLAN_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "lookup_visit_plan",
+        "description": (
+            "Everything worth raising with ONE store on a visit, by reason: what it buys more "
+            "of at this time of year, promotions on things it buys, items back in stock, "
+            "regular items due, win-backs with their reasons, new or trending items, its "
+            "staples -- each with the evidence -- plus the community holidays coming up. Use "
+            "it whenever a rep asks what to sell, pitch, bring up or prepare for a store or a "
+            "visit. Needs the account key: look the store up by name first if you only "
+            "have its name."),
+        "parameters": {"type": "object", "required": ["value"], "properties": {
+            "value": {"type": "string", "description": "The account key, e.g. HMO032."}}},
+    },
+}
+
+CHECK_PRODUCT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "check_store_product",
+        "description": (
+            "Check one product idea against ONE store's buying: which of our items match, "
+            "whether the store buys them, whether it buys more than usual in the weeks before "
+            "a date, whether other stores do, and stock and price now. Use it to test an "
+            "idea before recommending it -- above all a holiday ingredient. Call it once per "
+            "idea; several calls at once is fine."),
+        "parameters": {"type": "object", "required": ["customer_key", "product_words"], "properties": {
+            "customer_key": {"type": "string", "description": "Account key, e.g. HMO032."},
+            "product_words": {"type": "string", "description": (
+                "ONE product, as a wholesale catalog label would name it, 1-3 words. Other "
+                "names for that same product may follow, separated by | -- e.g. sweet "
+                "rice|glutinous rice|sticky rice. A different product is a separate call.")},
+            "occasion": {"type": "string", "description": "The holiday it is for, if any."},
+            "occasion_date": {"type": "string", "description": "That holiday's date, YYYY-MM-DD."},
+            "dish": {"type": "string", "description": "The dish it goes into, if any."},
+        }},
+    },
+}
+
+
+def dbx_records(sql: str, params: dict) -> list:
+    """A query with bound STRING parameters, as name-to-value records."""
+    result = common.databricks({
+        "warehouse_id": common.DBX_WAREHOUSE, "statement": sql,
+        "parameters": [{"name": k, "value": str(v), "type": "STRING"} for k, v in params.items()],
+        "wait_timeout": "50s", "on_wait_timeout": "CANCEL",
+        "disposition": "INLINE", "format": "JSON_ARRAY",
+    })
+    status = result.get("status") or {}
+    if status.get("state") != "SUCCEEDED":
+        sys.stderr.write("  SQL %s: %s\n" % (status.get("state"),
+                                              ((status.get("error") or {}).get("message") or "")[:300]))
+        raise common.Fail("Databricks returned %s" % status.get("state"))
+    return labelled_rows(*common.rows_of(result))
+
+
+def _account_key(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]", "", value or "").upper()
+
+
+def _is_true(value) -> bool:
+    return str(value).lower() == "true"
+
+
+def read_plan_item(r: dict) -> str:
+    """One visit-plan row as the facts a rep would want before raising it."""
+    section = r.get("section")
+    unit = (r.get("price_unit") or "").replace("ip", "innerpack")
+    each = ((" an %s" if unit[:1] in "aeiou" else " a %s") % unit) if unit else ""
+    facts = []
+    times = int(_num(r.get("times_bought")) or 0)
+    if times:
+        facts.append("bought %d time%s, last on %s" % (times, "" if times == 1 else "s", _day(r["last_bought"])))
+        if section == "due" and _num(r.get("median_days_between_purchases")):
+            facts.append("usually about every %d days, so due again" % _num(r["median_days_between_purchases"]))
+    elif section in ("promo", "new_trending"):
+        facts.append("they have never bought it; they buy this category on %d days a year"
+                     % int(_num(r.get("category_days")) or 0))
+    elif section == "occasion":
+        facts.append("they have not bought it from us -- a suggestion")
+    lift = _num(r.get("store_lift"))
+    if section == "occasion":
+        if r.get("holiday_why"):
+            facts.append(r["holiday_why"].rstrip("."))
+        if lift and lift >= 1.3:
+            facts.append("in the 5 weeks before %s they usually buy %.1f times their normal amount"
+                         % (r.get("holiday") or "it", lift))
+        if (_num(r.get("peer_lift")) or 0) >= 1.15:
+            facts.append("stores that celebrate it buy %.1f times their usual amount beforehand"
+                         % _num(r["peer_lift"]))
+    elif lift and lift >= 1.3:
+        facts.append("in the next 5 weeks they usually buy %.1f times their normal amount (2019-2025)" % lift)
+    paid, now = _num(r.get("last_paid_unit_price")), _num(r.get("price_now"))
+    if paid and now and abs(now - paid) >= 0.01:
+        facts.append("last paid %s%s, %s now (%d%% %s)" % (
+            _price(paid), each, _price(now), round(abs(now / paid - 1) * 100), "more" if now > paid else "less"))
+    elif now:
+        facts.append("%s%s" % (_price(now), each))
+    if section == "back_in_stock" and r.get("oos_from"):
+        facts.append("U.S. Trading was out of it from %s to %s; back in stock now"
+                     % (_day(r["oos_from"]), _day(r["oos_to"])))
+    if int(_num(r.get("oos_days_when_due")) or 0):
+        facts.append("we were out of stock for %d days around when they were due (%s to %s)" % (
+            _num(r["oos_days_when_due"]), _day(r["first_oos_when_due"]), _day(r["last_oos_when_due"])))
+    if int(_num(r.get("backorder_requests")) or 0):
+        facts.append("they asked for it while we were out, last on %s" % _day(r["last_backorder_date"]))
+    if _is_true(r.get("is_on_promotion")):
+        buy, free = _num(r.get("promo_buy_qty")), _num(r.get("promo_free_qty"))
+        promo = "on promotion"
+        if buy and free:
+            promo += ": buy %d get %d free" % (buy, free)
+        elif _num(r.get("promo_price")):
+            promo += " at %s" % _price(r["promo_price"])
+        if r.get("promo_end_date"):
+            promo += " until %s" % _day(r["promo_end_date"])
+        facts.append(promo)
+    if _is_true(r.get("is_trending")):
+        facts.append("trending on social media this week")
+    elif _is_true(r.get("is_new_item")) and section == "new_trending":
+        facts.append("a new item")
+    if section == "promo_ending" and r.get("promo_days_left") not in (None, ""):
+        facts.append("the promotion ends in %d days" % int(_num(r["promo_days_left"])))
+    if section == "low_stock" and _num(r.get("stock_vs_usual")) is not None:
+        facts.append("our stock is down to %d%% of its usual level -- worth ordering now"
+                     % round(_num(r["stock_vs_usual"]) * 100))
+    if section == "buying_less" and _num(r.get("recent_vs_prior")) is not None:
+        facts.append("in the last 6 months they bought %d%% of what they bought in the 6 before"
+                     % round(_num(r["recent_vs_prior"]) * 100))
+    if section in ("alternative", "own_brand") and r.get("alt_for"):
+        # Case prices only, each with its case size: a case of 6 at $36 against
+        # a case of 24 at $82 is no saving, and what is in each unit is not in
+        # the data -- so no "cheaper" or percentage here.
+        other = _title_case(r["alt_for"])
+        theirs = _num(r.get("alt_for_price"))
+        ours_n, theirs_n = _num(r.get("case_qty")), _num(r.get("alt_for_case_qty"))
+
+        def case(price, n):
+            return "%s for a case of %d" % (_price(price), n) if price and n else (_price(price) if price else "")
+        compare = (" (ours %s; theirs %s -- compare what is in each before quoting a saving)"
+                   % (case(now, ours_n), case(theirs, theirs_n))) if now and theirs else ""
+        facts.append(("in place of %s, which they buy and we are out of%s" if section == "alternative"
+                      else "our own brand, in place of %s, which they buy%s") % (other, compare))
+    if _is_true(r.get("pack_change_suspect")):
+        facts.append("its case price changed by a third or more for every store in recent months -- "
+                     "likely a new pack size, so check before comparing prices")
+    if section == "peer_gap" and _num(r.get("peer_share")):
+        facts.append("%d%% of stores in the same community buy it; this store never has"
+                     % round(_num(r["peer_share"]) * 100))
+    facts.append("in stock" if _is_true(r.get("is_in_stock")) else "OUT OF STOCK now -- do not lead with it")
+    return "%s: %s." % (_title_case(r.get("item_label")), "; ".join(facts))
+
+
+def lookup_visit_plan(value: str, rep: str = "") -> str:
+    key = _account_key(value)
+    if not re.fullmatch(r"[A-Z]{3}\d{3}", key):
+        return json.dumps({"error": "That is not an account key. Find the store with "
+                                    "find_customer_by_name first, then pass its key."})
+    rep_clause = " AND p.owner_rep_name = :rep_name" if rep else ""
+    params = {"key": key, **({"rep_name": rep} if rep else {})}
+    box: dict = {}
+
+    def plan():
+        box["rows"] = dbx_records(
+            "SELECT p.*, c.customer_name, c.city FROM %s p "
+            "LEFT JOIN ust_databricks.ust_dims.dim_customers c USING (customer_key) "
+            "WHERE p.customer_key = :key%s ORDER BY p.section, p.rank_in_section"
+            % (VISIT_PLAN_TABLE, rep_clause), params)
+
+    def account():
+        # How the store is doing as a whole: an account well past its usual
+        # gap is an angle for the visit in itself.
+        box["account"] = dbx_records(
+            "SELECT usual_gap_days, days_since_last_invoice_any_rep AS days_since_last_order, "
+            "rhythm_status FROM ust_databricks.ust_reporting.mart_rep_account_status "
+            "WHERE customer_key = :key LIMIT 1", {"key": key})
+
+    try:
+        workers = [threading.Thread(target=f) for f in (plan, account)]
+        for w in workers:
+            w.start()
+        for w in workers:
+            w.join()
+        rows = box["rows"]
+    except (common.Fail, KeyError) as exc:
+        return json.dumps({"error": str(exc) or "The visit plan could not be read."})
+    if not rows:
+        return json.dumps({"error": "No visit plan for %s%s. Check the key, or whether it is "
+                                    "one of this rep's accounts." % (key, " for " + rep if rep else "")})
+    full, slim = {}, {}
+    for r in rows:
+        extra = ({"holiday": r["holiday"], "holiday_date": r.get("holiday_date"), "dish": r.get("dish"),
+                  "days_until": r.get("days_until")} if r.get("holiday") else {})
+        full.setdefault(r["section"], []).append({
+            "item": _title_case(r.get("item_label")), "detail": read_plan_item(r),
+            "can_lead": _is_true(r.get("can_lead")), **extra})
+        slim.setdefault(r["section"], []).append({
+            "item": _title_case(r.get("item_label")), "why": plan_reason(r), **extra})
+    first = rows[0]
+    store = {"customer_key": key, "name": _title_case(first.get("customer_name")),
+             "city": _title_case(first.get("city")), "plan_as_of": first.get("as_of_date")}
+    order = [name for name, _ in PLAN_SECTIONS]
+    # The model gets each item's name and one reason; the screen card and
+    # lookup_plan_item get the whole of it. Handed all 40-odd rows in full,
+    # the model answered the first question well and then, a turn later, could
+    # not find the cooking pot in them and invented a price for the steamer.
+    holidays = sorted({(e["holiday_date"], e["holiday"], e.get("days_until"))
+                       for e in full.get("occasion", []) if e.get("holiday_date")})
+    with _plan_lock:
+        if len(_plan_cache) >= 256:
+            _plan_cache.pop(next(iter(_plan_cache)))
+        _plan_cache[(key, rep)] = {"at": time.time(), "store": store,
+                                   "sections": {n: full[n] for n in order if n in full}}
+    acct = (box.get("account") or [{}])[0]
+    titles = dict(PLAN_SECTIONS)
+    return json.dumps({
+        "store": store,
+        "account": ("usually orders about every %s days; last order %s days ago (%s)"
+                    % (acct.get("usual_gap_days"), acct.get("days_since_last_order"), acct.get("rhythm_status"))
+                    if acct.get("days_since_last_order") else "no ordering rhythm on record"),
+        "possible_reasons_account_is_slowing": slowing_reasons(rows) or ["nothing in the data points to one"],
+        "store_holidays": [{"holiday": h, "date": d, "days_until": n} for d, h, n in holidays],
+        "ideas": {titles[n]: slim[n][:PLAN_ITEMS_TO_MODEL] if n != "occasion" else slim[n]
+                  for n in order if n in slim},
+        "details": "Each item's full facts are on the rep's screen; for one item's facts "
+                   "in a later answer, use lookup_plan_item.",
+        "before_you_answer": VISIT_GUIDE,
+    })
+
+
+_plan_lock = threading.Lock()
+_plan_cache: dict[tuple, dict] = {}
+
+
+def plan_reason(r: dict) -> str:
+    """One short reason for a visit-plan item -- what the model chooses from."""
+    section = r.get("section")
+    bits = []
+    if section == "occasion":
+        bits.append("for %s (%s, in %s days)" % (r.get("holiday"), _day(r["holiday_date"]),
+                                                 int(_num(r.get("days_until")) or 0)))
+        if (_num(r.get("store_lift")) or 0) >= 1.3:
+            bits.append("buys %.1fx its usual amount before it" % _num(r["store_lift"]))
+        elif (_num(r.get("peer_lift")) or 0) >= 1.15:
+            bits.append("stores that celebrate it buy %.1fx usual beforehand" % _num(r["peer_lift"]))
+        bits.append("they buy it" if _num(r.get("times_bought")) else "never bought by them -- a suggestion")
+    elif section == "season" and _num(r.get("store_lift")):
+        bits.append("buys %.1fx its usual amount in the next 5 weeks" % _num(r["store_lift"]))
+    elif section == "promo":
+        buy, free = _num(r.get("promo_buy_qty")), _num(r.get("promo_free_qty"))
+        bits.append("on promotion" + ((": buy %d get %d free" % (buy, free)) if buy and free else ""))
+        bits.append("they buy it" if _num(r.get("times_bought")) else "new to them; they buy the category")
+    elif section == "back_in_stock" and r.get("oos_from"):
+        bits.append("we were out %s to %s; back in stock" % (_day(r["oos_from"]), _day(r["oos_to"])))
+    elif section in ("due", "winback"):
+        # Why it has not been reordered, where the data says: asked "why did
+        # they stop buying the cooking pot?", the model -- seeing only "due
+        # again" -- said it had no idea, with the stockout in the full row.
+        why = []
+        if int(_num(r.get("oos_days_when_due")) or 0):
+            why.append("we were out of stock for %d days when they were due" % _num(r["oos_days_when_due"]))
+        if int(_num(r.get("backorder_requests")) or 0):
+            why.append("they asked for it while we were out")
+        if section == "due":
+            bits.append("regular item, last bought %s, due again" % _day(r["last_bought"]) if r.get("last_bought")
+                        else "regular item, due again")
+        else:
+            bits.append("lapsed since %s" % (_day(r["last_bought"]) if r.get("last_bought") else "?"))
+        bits += why
+    elif section == "promo_ending":
+        buy, free = _num(r.get("promo_buy_qty")), _num(r.get("promo_free_qty"))
+        bits.append("promotion%s ends in %d days" % ((" (buy %d get %d free)" % (buy, free)) if buy and free else "",
+                                                    int(_num(r.get("promo_days_left")) or 0)))
+    elif section == "price_drop":
+        bits.append("they buy it")
+    elif section == "low_stock":
+        bits.append("they buy it; our stock is at %d%% of usual" % round((_num(r.get("stock_vs_usual")) or 0) * 100))
+    elif section == "buying_less":
+        bits.append("last 6 months at %d%% of the 6 before" % round((_num(r.get("recent_vs_prior")) or 0) * 100))
+    elif section == "alternative":
+        bits.append("in place of %s, which we are out of" % _title_case(r.get("alt_for")))
+    elif section == "own_brand":
+        bits.append("our own brand in place of %s; case sizes differ, so no saving to quote"
+                    % _title_case(r.get("alt_for"))
+                    if _num(r.get("case_qty")) != _num(r.get("alt_for_case_qty"))
+                    else "our own brand in place of %s" % _title_case(r.get("alt_for")))
+    elif section == "peer_gap":
+        bits.append("%d%% of similar stores buy it; never bought here" % round((_num(r.get("peer_share")) or 0) * 100))
+    elif section == "new_trending":
+        bits.append("trending on social" if _is_true(r.get("is_trending")) else "new item")
+        bits.append("never bought; they buy the category")
+    elif section == "staple":
+        bits.append("bought on %d days in the last year" % int(_num(r.get("days_bought_365")) or 0))
+    paid, now = _num(r.get("last_paid_unit_price")), _num(r.get("price_now"))
+    if _is_true(r.get("pack_change_suspect")):
+        bits.append("case price changed for every store lately -- likely a new pack size")
+    elif paid and now and abs(now / paid - 1) >= 0.05:
+        bits.append("price %s %d%% since they last paid" % ("up" if now > paid else "down",
+                                                          round(abs(now / paid - 1) * 100)))
+    if not _is_true(r.get("is_in_stock")):
+        bits.append("OUT OF STOCK")
+    return "; ".join(bits)
+
+
+def slowing_reasons(rows: list) -> list:
+    """Likely reasons an account has slowed, from its own plan: items we were
+    out of when they came to reorder (or lately), big price rises on what they
+    buy, items they buy far less of. Asked "why haven't they ordered in so
+    long?", the model -- with none of this joined up -- said there was no
+    specific reason, with the stockouts in the same plan."""
+    seen, when_due, lately, rises, less = set(), [], [], [], []
+    # Out when they came to reorder first, longest first: that is the likelier cause.
+    for r in sorted(rows, key=lambda r: -(_num(r.get("oos_days_when_due")) or 0)):
+        name = _title_case(r.get("item_label"))
+        if int(_num(r.get("oos_days_when_due")) or 0) and name not in seen:
+            # Weeks given too: asked to say it, the model turned 56 days into
+            # "about 5 or 6 weeks".
+            days = int(_num(r["oos_days_when_due"]))
+            when_due.append("%s (out %d days, about %d weeks, when they were due)"
+                            % (name, days, max(1, round(days / 7))))
+            seen.add(name)
+    for r in rows:
+        name = _title_case(r.get("item_label"))
+        if r.get("section") == "back_in_stock" and r.get("oos_from") and name not in seen:
+            lately.append("%s (out %s to %s)" % (name, _day(r["oos_from"]), _day(r["oos_to"])))
+            seen.add(name)
+    stockouts = when_due + lately
+    for r in rows:
+        name = _title_case(r.get("item_label"))
+        paid, now = _num(r.get("last_paid_unit_price")), _num(r.get("price_now"))
+        if (paid and now and now >= paid * 1.15 and not _is_true(r.get("pack_change_suspect"))
+                and r.get("section") in ("due", "staple", "winback") and name not in {x[0] for x in rises}):
+            rises.append((name, round((now / paid - 1) * 100)))
+        if r.get("section") == "buying_less" and name not in less:
+            less.append(name)
+    out = []
+    if stockouts:
+        out.append("we were out of stock on things they buy: " + "; ".join(stockouts[:4]))
+    if rises:
+        rises.sort(key=lambda x: -x[1])
+        out.append("prices are up 15%% or more since they last paid on %d of their items, e.g. %s"
+                   % (len(rises), "; ".join("%s +%d%%" % x for x in rises[:3])))
+    if less:
+        out.append("they are buying much less of: " + "; ".join(less[:4]))
+    return out
+
+
+PLAN_ITEM_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "lookup_plan_item",
+        "description": (
+            "The full facts for one item in a store's visit plan -- what they paid, the price "
+            "now, stock, how often they buy it, any stockout or promotion. Use it when the rep "
+            "asks about one item after a visit plan: never answer from memory."),
+        "parameters": {"type": "object", "required": ["customer_key", "item"], "properties": {
+            "customer_key": {"type": "string", "description": "Account key, e.g. HMO032."},
+            "item": {"type": "string", "description": "A few words of the item's name, e.g. cooking pot."},
+        }},
+    },
+}
+
+
+def lookup_plan_item(args: dict, rep: str = "") -> str:
+    key = _account_key(args.get("customer_key"))
+    want = set(re.findall(r"[a-z0-9]+", (args.get("item") or "").lower()))
+    if not want:
+        return json.dumps({"error": "Say which item, e.g. cooking pot."})
+    with _plan_lock:
+        cached = _plan_cache.get((key, rep))
+    if not cached:
+        json.loads(lookup_visit_plan(key, rep))       # fills the cache, or there is no plan
+        with _plan_lock:
+            cached = _plan_cache.get((key, rep))
+    if not cached:
+        return json.dumps({"error": "No visit plan for %s." % key})
+    found = []
+    for section, entries in cached["sections"].items():
+        for e in entries:
+            words = set(re.findall(r"[a-z0-9]+", e["item"].lower()))
+            if want <= words or len(want & words) >= max(1, len(want) - 1):
+                found.append({"section": dict(PLAN_SECTIONS).get(section, section), "facts": e["detail"]})
+    return json.dumps({"item": args.get("item"), "found": found[:4]} if found else
+                      {"error": "No item like %r in that store's visit plan. Try other words, "
+                                "or search_items." % args.get("item")})
+
+
+def _match_clause(words: str) -> tuple[str, dict]:
+    """'sweet rice|glutinous rice' as a bound LIKE clause on item_label."""
+    params, ors = {}, []
+    for i, variant in enumerate((words or "").split("|")[:4]):
+        ands = []
+        for j, word in enumerate([w for w in re.findall(r"[a-z0-9]+", variant.lower()) if len(w) > 1][:4]):
+            params["w%d_%d" % (i, j)] = "%" + word + "%"
+            ands.append("lower(item_label) LIKE :w%d_%d" % (i, j))
+        if ands:
+            ors.append("(" + " AND ".join(ands) + ")")
+    return ("(" + " OR ".join(ors) + ")") if ors else "FALSE", params
+
+
+def check_store_product(args: dict, rep: str = "") -> str:
+    key = _account_key(args.get("customer_key"))
+    words = args.get("product_words") or ""
+    match, params = _match_clause(words)
+    if match == "FALSE":
+        return json.dumps({"error": "Give the product in a few words, e.g. sweet rice|sticky rice."})
+    date = re.match(r"(\d{4})-(\d{2})-(\d{2})", args.get("occasion_date") or "")
+    params.update({"key": key, "mo": date.group(2) if date else "1", "dy": date.group(3) if date else "1"})
+    before = ("datediff(make_date(year(p.posting_date), CAST(:mo AS INT), CAST(:dy AS INT)), "
+              "p.posting_date) BETWEEN 0 AND 34")
+    try:
+        rows = dbx_records("""
+            WITH items AS (
+                SELECT item_no, item_label, unit_price, is_in_stock, shippable_qty
+                FROM ust_databricks.ust_dims.dim_items WHERE is_sellable AND NOT is_blocked AND %(match)s),
+            store AS (
+                SELECT p.item_no, count(DISTINCT p.posting_date) AS times_bought, max(p.posting_date) AS last_bought,
+                       sum(CASE WHEN year(p.posting_date) BETWEEN 2019 AND 2025 AND %(before)s
+                                THEN p.sold_quantity ELSE 0 END) / 7 AS before_qty,
+                       count(DISTINCT CASE WHEN year(p.posting_date) BETWEEN 2019 AND 2025 AND %(before)s
+                                           THEN p.posting_date END) AS before_buys,
+                       sum(CASE WHEN year(p.posting_date) BETWEEN 2019 AND 2025 THEN p.sold_quantity ELSE 0 END)
+                           / (7 * 365 / 35.0) AS usual_qty
+                FROM ust_databricks.ust_intermediate.int_customer_item_purchases p JOIN items i USING (item_no)
+                WHERE p.customer_key = :key AND p.sold_quantity > 0 GROUP BY p.item_no),
+            everyone AS (
+                SELECT p.item_no, sum(CASE WHEN %(before)s THEN p.sold_quantity ELSE 0 END) / 3 AS before_qty,
+                       sum(p.sold_quantity) / 39.0 AS usual_qty, count(DISTINCT p.customer_key) AS stores
+                FROM ust_databricks.ust_intermediate.int_customer_item_purchases p JOIN items i USING (item_no)
+                WHERE p.posting_date >= '2023-01-01' AND p.posting_date < '2026-01-01' AND p.sold_quantity > 0
+                GROUP BY p.item_no)
+            SELECT i.item_label, i.unit_price, i.is_in_stock, i.shippable_qty,
+                   coalesce(s.times_bought, 0) AS times_bought, s.last_bought,
+                   CASE WHEN s.before_buys >= 3 THEN round(s.before_qty / nullif(s.usual_qty, 0), 2) END AS store_lift,
+                   CASE WHEN e.stores >= 3 THEN round(e.before_qty / nullif(e.usual_qty, 0), 2) END AS all_stores_lift,
+                   (SELECT first(owner_rep_name) FROM ust_databricks.ust_dims.dim_customers
+                     WHERE customer_key = :key) AS owner_rep_name
+            FROM items i LEFT JOIN store s USING (item_no) LEFT JOIN everyone e USING (item_no)
+            ORDER BY times_bought DESC, i.is_in_stock DESC LIMIT 3""" % {"match": match, "before": before},
+            params)
+    except common.Fail as exc:
+        return json.dumps({"error": str(exc)})
+    if rows and rep and (rows[0].get("owner_rep_name") or "") != rep:
+        return json.dumps({"error": "That is not one of %s's accounts." % rep})
+    matches = []
+    for r in rows:
+        facts = []
+        times = int(_num(r.get("times_bought")) or 0)
+        facts.append(("this store bought it %d times, last on %s" % (times, _day(r["last_bought"])))
+                     if times else "this store has never bought it from us")
+        if date:
+            lift, others = _num(r.get("store_lift")), _num(r.get("all_stores_lift"))
+            if lift is not None:
+                facts.append(("in the 5 weeks before this date it buys %.1f times its usual amount" % lift)
+                             if lift >= 1.3 else "it buys no more than usual before this date")
+            if others is not None and others >= 1.15:
+                facts.append("our stores overall buy %.1f times their usual amount before it" % others)
+        stock = _is_true(r.get("is_in_stock"))
+        facts.append(("in stock, %s" % _price(r["unit_price"])) if stock else "OUT OF STOCK now -- do not lead with it")
+        matches.append({"item": _title_case(r.get("item_label")), "can_lead": stock,
+                        "detail": "%s: %s." % (_title_case(r.get("item_label")), "; ".join(facts))})
+    return json.dumps({
+        "checked": words, "occasion": args.get("occasion") or "", "occasion_date": args.get("occasion_date") or "",
+        "dish": args.get("dish") or "", "matches": matches,
+        "note": ("Nothing in our catalog matched." if not matches else
+                 "Recommend a match for the occasion only where the store buys it, or buys more "
+                 "before the date; say what it rests on.")})
+
+
+# ------------------------------------------------------------------ fact check
+#
+# A prompt cannot stop the model inventing a figure. Asked "tell me more about
+# the steamer" a turn after the visit plan, it said "$12.50, 142 units, buy 10
+# get 2 free" -- none of it anywhere in the data. So before a reply is spoken,
+# every price, percentage, multiple, quantity and date in it must appear in a
+# lookup result from this call (or in what the rep said). If one does not, the
+# model gets one chance to correct it; whatever is still unsupported after
+# that is taken out, sentence by sentence.
+
+_MONTHS = {m: i for i, m in enumerate(
+    ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"), 1)}
+_FACT_PATTERNS = (
+    ("money", re.compile(r"\$\s?(\d[\d,]*(?:\.\d+)?)")),
+    ("percent", re.compile(r"(\d+(?:\.\d+)?)\s?%")),
+    ("times", re.compile(r"(\d+(?:\.\d+)?)\s?(?:x|×|times)\b", re.I)),
+    ("count", re.compile(r"(\d[\d,]*)\s+(?:units|cases|boxes|bags|packs|orders|stores|lbs|pounds|days|weeks)\b", re.I)),
+    # Never from the middle of a figure: "$1,080,000" is one number, not "080,000".
+    ("number", re.compile(r"(?<![\d.,$])(\d{3,}(?:,\d{3})*(?:\.\d+)?)(?![\d%,])")),
+)
+_DATE_IN_TEXT = re.compile(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+(\d{1,2})\b", re.I)
+_ISO_DATE = re.compile(r"\b20\d\d-(\d\d)-(\d\d)\b")
+
+
+def _evidence_text(history: list, rep: str) -> str:
+    """Everything this call's answer may draw figures from: every lookup result
+    (earlier turns' included -- with_evidence put them back), the full visit
+    plans behind the short versions the model saw, and the rep's own words."""
+    parts = []
+    for m in history:
+        if m.get("role") == "tool" or m.get("role") == "user":
+            parts.append(str(m.get("content") or ""))
+            if m.get("role") == "tool" and '"store"' in str(m.get("content") or ""):
+                try:
+                    key = json.loads(m["content"])["store"]["customer_key"]
+                except (ValueError, KeyError, TypeError):
+                    continue
+                with _plan_lock:
+                    cached = _plan_cache.get((key, rep))
+                if cached:
+                    parts += [e["detail"] for entries in cached["sections"].values() for e in entries]
+    return "\n".join(parts)
+
+
+def unsupported_facts(answer: str, evidence: str) -> list:
+    text = _VISUAL_FENCE.sub("", answer or "")
+    numbers = set()
+    for raw in re.findall(r"\d[\d,]*(?:\.\d+)?", evidence):
+        try:
+            numbers.add(round(float(raw.replace(",", "")), 2))
+        except ValueError:
+            pass
+    dates = {(int(a), int(b)) for a, b in _ISO_DATE.findall(evidence)}
+    dates |= {(_MONTHS[m[:3].lower()], int(d)) for m, d in _DATE_IN_TEXT.findall(evidence)}
+    tolerance = {"money": 0.01, "percent": 0.5, "times": 0.05, "count": 0, "number": 0.01}
+    missing = []
+    for kind, pattern in _FACT_PATTERNS:
+        for found in pattern.finditer(text):
+            try:
+                value = float(found.group(1).replace(",", ""))
+            except ValueError:
+                continue
+            # Whole dollars are rounded on purpose ($936,051 for 936051.40).
+            allow = 0.5 if kind in ("money", "number") and "." not in found.group(1) else tolerance[kind]
+            if not any(abs(value - n) <= allow for n in numbers):
+                missing.append(found.group(0).strip())
+    for m, d in _DATE_IN_TEXT.findall(text):
+        if (_MONTHS[m[:3].lower()], int(d)) not in dates:
+            missing.append("%s %s" % (m, d))
+    return sorted(set(missing))
+
+
+def fact_checked(answer: str, history: list, model: str, max_tokens: int, rep: str) -> str:
+    evidence = _evidence_text(history, rep)
+    missing = unsupported_facts(answer, evidence)
+    if not missing:
+        return answer
+    sys.stderr.write("  FACT CHECK: not in the data: %s -- asking for a correction\n" % ", ".join(missing))
+    correction = [
+        {"role": "assistant", "content": answer},
+        {"role": "user", "content": (
+            "Before that is spoken: these figures are in no lookup result in this conversation: "
+            "%s. Write the answer again using only figures that came back from a lookup. If "
+            "you need one you do not have, leave it out or offer to look it up. Keep any lead "
+            "block. Reply with the corrected answer only." % ", ".join(missing))},
+    ]
+    try:
+        fixed = (((call_upstream_llm(history + correction, model, max_tokens, []).get("choices") or [{}])[0])
+                 .get("message") or {}).get("content") or ""
+    except UpstreamError:
+        fixed = ""
+    fixed = fixed.strip() or answer
+    still = unsupported_facts(fixed, evidence)
+    if not still:
+        return fixed
+    # Still there: take out the sentences that carry them.
+    sys.stderr.write("  FACT CHECK: still unsupported: %s -- removing those sentences\n" % ", ".join(still))
+    blocks = "".join(m.group(0) for m in _VISUAL_FENCE.finditer(fixed))
+    prose = _VISUAL_FENCE.sub("", fixed)
+    kept = [s for s in re.split(r"(?<=[.!?])\s+", prose) if not any(f in s for f in still)]
+    text = " ".join(kept).strip()
+    if not re.search(r"[A-Za-z]{3}", text):
+        text = "I don't have that figure in front of me. Want me to look it up?"
+    return (text + ("\n" + blocks if blocks else "")).strip()
+
+
+_LEAD_BLOCK = re.compile(r"```[ \t]*lead[ \t]*\n?(.*?)```", re.S | re.I)
+
+
+_TOOL_MARKUP = re.compile(r"<\|?tool_call\|?>.*?(?:<\|?tool_call\|?>|$)|\bcall:\w+\{.*?\}", re.S)
+
+
+def without_tool_markup(answer: str) -> str:
+    """The reply with any tool call the model wrote out as text taken out.
+
+    Out of rounds and offered no tools, the model wrote its next lookup as
+    "<|tool_call>call:lookup_visit_plan{...}<tool_call|>", and the voice read
+    it to the rep. Whatever is left is the answer; if nothing is, say so."""
+    if not _TOOL_MARKUP.search(answer or ""):
+        return answer
+    sys.stderr.write("  LLM proxy: tool-call text in the reply, removed\n")
+    text = " ".join(_TOOL_MARKUP.sub(" ", answer).split())
+    # "Let me check." on its own is not an answer -- the rep heard it already.
+    return text if len(text.split()) >= 6 else (
+        "Sorry, I couldn't pull that up just now. Could you ask me once more?")
+
+
+def _plan_shown_before(messages: list, card: dict) -> bool:
+    """Whether an earlier turn of this call already looked up this store's plan."""
+    for m in messages:
+        if m.get("role") == "tool" and '"store"' in str(m.get("content") or ""):
+            try:
+                store = json.loads(m["content"]).get("store") or {}
+            except (ValueError, AttributeError):
+                continue
+            if card.get("title", "").startswith("Visit plan: %s," % store.get("name")):
+                return True
+    return False
+
+
+def drop_dangling_intro(answer: str) -> str:
+    """"The full plan is on your screen, but I'd lead with these:" introduced
+    the lead block, which is not spoken -- so the voice ended on a list that
+    never came. The clause after the last comma goes, or the whole sentence if
+    it has no comma."""
+    text = (answer or "").rstrip()
+    if not text.endswith(":"):
+        return answer
+    body = text[:-1]
+    start = max(body.rfind(". "), body.rfind("! "), body.rfind("? "))
+    cut = max(body.rfind(","), body.rfind(";"))
+    if cut > start:
+        return body[:cut].rstrip() + "."
+    return body[:start + 1].strip() if start >= 0 else answer
+
+
+_PLAN_BLOCK = re.compile(r"```[ \t]*plan[ \t]*\n?(.*?)```", re.S | re.I)
+
+
+def take_angles(answer: str) -> list:
+    """The angles the model chose for this visit, from its ```plan block:
+    [{"angle": "...", "items": ["...", ...]}, ...]. The block itself goes with
+    the other fenced blocks in take_visuals."""
+    found = _PLAN_BLOCK.search(answer or "")
+    if not found:
+        return []
+    try:
+        angles = json.loads(found.group(1).strip())
+    except ValueError:
+        return []
+    out = []
+    for a in angles if isinstance(angles, list) else []:
+        if isinstance(a, dict) and a.get("angle") and isinstance(a.get("items"), list):
+            out.append({"angle": " ".join(str(a["angle"]).split())[:90],
+                        "items": [str(i) for i in a["items"] if i][:5]})
+    return out[:5]
+
+
+def take_leads(answer: str) -> list:
+    """The item names in the answer's ```lead block (the block itself goes with the
+    other fenced blocks in take_visuals)."""
+    found = _LEAD_BLOCK.search(answer or "")
+    if not found:
+        return []
+    try:
+        names = json.loads(found.group(1).strip())
+    except ValueError:
+        names = re.findall(r'"([^"]+)"', found.group(1))
+    return [str(n) for n in names if n][:6] if isinstance(names, list) else []
+
+
+def _is_lead(item: str, leads: list) -> bool:
+    """Every word of a lead pick in the item's name: "Alum Hmong Steamer" marks
+    "Alum Hmong Steamer (28Cm)", and "Nam Sausage (M)" does not mark size S."""
+    words = set(re.findall(r"[a-z0-9]+", item.lower()))
+    return any(want and want <= words
+               for want in (set(re.findall(r"[a-z0-9]+", lead.lower())) for lead in leads))
+
+
+def build_plan_card(turn: list, leads: list, rep: str = "", angles: list | None = None,
+                    evidence: str = "") -> dict | None:
+    """A visit plan as a screen card, from this turn's lookups.
+
+    "For this visit" is the angles the model chose for this store, in its
+    order, each with its items' full facts filled in here from the rows -- the
+    model names the angle and the items, never the figures. Everything else in
+    the plan follows under "More ideas", so nothing the voice left out is lost
+    but the store's own priorities come first, not a fixed layout."""
+    plan, checks = None, []
+    for message in turn:
+        if message.get("role") != "tool":
+            continue
+        try:
+            payload = json.loads(message.get("content") or "{}")
+        except ValueError:
+            continue
+        if isinstance(payload, dict) and payload.get("ideas") is not None and payload.get("store"):
+            plan = payload
+        elif isinstance(payload, dict) and "matches" in payload and payload.get("matches"):
+            checks.append(payload)
+    if not plan:
+        return None
+    with _plan_lock:
+        cached = _plan_cache.get((plan["store"].get("customer_key"), rep))
+    by_title = {title: name for name, title in PLAN_SECTIONS}
+    plan = dict(plan, sections=cached["sections"] if cached else
+                {by_title.get(t, t): entries for t, entries in (plan.get("ideas") or {}).items()})
+
+    def item(entry):
+        return {"label": entry["item"], "detail": entry.get("detail") or entry.get("why") or "",
+                "lead": _is_lead(entry["item"], leads), "warn": not entry.get("can_lead", True)}
+
+    # The model's angles, each item found by name in any section. A title with
+    # a figure the data does not hold falls back to its first item's section.
+    featured = []
+    entries = [(name, e) for name, es in plan["sections"].items() for e in es]
+    entries += [("occasion", dict(m, holiday=c.get("occasion"))) for c in checks for m in c["matches"]]
+    for angle in angles or []:
+        picked, seen = [], set()
+        for wanted in angle["items"]:
+            hit = next(((n, e) for n, e in entries if _is_lead(e["item"], [wanted])), None)
+            if hit and hit[1]["item"] not in seen:
+                seen.add(hit[1]["item"])
+                picked.append(hit)
+        if not picked:
+            continue
+        title = angle["angle"]
+        if evidence and unsupported_facts(title, evidence):
+            title = dict(PLAN_SECTIONS).get(picked[0][0], title)
+        featured.append({"title": title, "items": [dict(item(e), lead=True) for _, e in picked]})
+
+    sections = []
+    occasion = {}
+    for entry in plan["sections"].get("occasion", []):
+        occasion.setdefault((entry.get("holiday") or "Upcoming", entry.get("holiday_date") or ""), {}).setdefault(
+            entry.get("dish") or "", []).append(item(entry))
+    for check in checks:
+        group = occasion.setdefault((check.get("occasion") or "Ideas checked", check.get("occasion_date") or ""), {})
+        group.setdefault(check.get("dish") or check.get("checked") or "", []).extend(
+            item(m) for m in check["matches"])
+    for (holiday, when), dishes in occasion.items():
+        title = "%s%s" % (holiday, (" (%s)" % _day(when)) if when else "")
+        sections.append({"title": title, "groups": [{"title": d, "items": items} for d, items in dishes.items()]})
+    for name, title in PLAN_SECTIONS:
+        if name != "occasion" and plan["sections"].get(name):
+            sections.append({"title": title, "items": [item(e) for e in plan["sections"][name]]})
+    store = plan["store"]
+    # Only this store's own holidays, on the dates its plan uses -- not every
+    # community's calendar, and not the calendar date where its city has one.
+    mine = sorted({(when, holiday) for (holiday, when) in occasion if when})
+    upcoming = "; ".join("%s %s" % (holiday, _day(when)) for when, holiday in mine)
+    return {"type": "plan", "source": "lookup_visit_plan",
+            "title": "Visit plan: %s, %s" % (store.get("name"), store.get("city")),
+            "note": ("This store's holidays coming up: " + upcoming) if upcoming else "",
+            "featured": featured,
+            "sections": sections}
 
 
 def _num_or_none(value):
@@ -1152,9 +2177,112 @@ def read_account_rhythm(r: dict) -> str:
     return "%s: %s%s." % (head, body, ("; " + "; ".join(extras)) if extras else "")
 
 
+def _day(value) -> str:
+    """'2022-03-28' -> 'Mar 28, 2022'."""
+    import datetime
+    d = datetime.date.fromisoformat(str(value)[:10])
+    return "%s %d, %d" % (d.strftime("%b"), d.day, d.year)
+
+
+def _price(value) -> str:
+    """62.87 -> '$62.87', 76.0 -> '$76'."""
+    text = "${:,.2f}".format(_num(value))
+    return text[:-3] if text.endswith(".00") else text
+
+
+def read_pitch_item(r: dict) -> str:
+    """One pitch-list item, as the facts a rep would want before raising it.
+
+    The list used to arrive as "reorder due, 685 days overdue" -- for an item
+    bought three times, last in 2022. What sells it, or explains why it
+    stopped, is when they last bought it, what they paid against today's price,
+    and whether we had any when they came to reorder. Dates and differences
+    are worked out here; the model only has to choose and say.
+    """
+    name = _title_case(r.get("item_label") or "")
+    pattern = r.get("purchase_pattern") or ""
+    times = int(_num(r.get("times_purchased")) or 0)
+    unit = (r.get("price_unit") or "").replace("ip", "innerpack")
+    each = (" an %s" if unit[:1] in "aeiou" else " a %s") % unit if unit else ""
+
+    if pattern == "suggestion":
+        head = "%s -- a suggestion, they have never bought it (%s)" % (name, r.get("opportunity_reason") or "")
+    elif pattern == "regular":
+        gap = _num(r.get("median_days_between_purchases"))
+        head = "%s -- a regular item: bought %d times, usually about every %d days, last on %s" % (
+            name, times, gap or 0, _day(r["last_purchase_date"]))
+        if (_num(r.get("days_overdue")) or 0) > 0:
+            head += ", so due again"
+    else:
+        head = "%s -- lapsed: bought %d time%s, last on %s" % (
+            name, times, "" if times == 1 else "s", _day(r["last_purchase_date"]))
+
+    facts = []
+    paid, now = _num(r.get("last_paid_unit_price")), _num(r.get("unit_price"))
+    if paid and now:
+        pct = _num(r.get("price_change_pct"))
+        if abs(now - paid) < 0.01:
+            facts.append("same price as they last paid, %s%s" % (_price(now), each))
+        elif abs(pct or 0) < 1:
+            facts.append("last paid %s%s, %s now (about the same)" % (_price(paid), each, _price(now)))
+        else:
+            facts.append("last paid %s%s, %s now (%d%% %s)" % (
+                _price(paid), each, _price(now), abs(pct or 0), "more" if now > paid else "less"))
+    elif now:
+        facts.append("%s%s" % (_price(now), each))
+
+    oos, checked = int(_num(r.get("oos_days_when_due")) or 0), int(_num(r.get("stock_days_checked")) or 0)
+    if oos:
+        facts.append("U.S. Trading was out of stock -- we had none to ship them -- for %d days "
+                     "around when it came due (%s to %s)" % (
+            oos, _day(r["first_oos_when_due"]), _day(r["last_oos_when_due"])))
+    elif pattern != "suggestion" and checked:
+        facts.append("we had stock when it came due")
+    elif pattern == "lapsed":
+        # History starts Oct 2025: silence here is "unknown", not "in stock".
+        facts.append("no stock record from when it was due")
+
+    asks = int(_num(r.get("backorder_requests")) or 0)
+    if asks:
+        facts.append("they asked for it while we were out %d time%s, last on %s" % (
+            asks, "" if asks == 1 else "s", _day(r["last_backorder_date"])))
+
+    # Asked "why did they stop?", the model said it had no reason on record
+    # one run in two -- with the stockout and the price rise in the same row.
+    # Joined up here, the likely reasons are a fact it can repeat.
+    reasons = []
+    if oos:
+        reasons.append("we were out of stock when they came to reorder")
+    if asks:
+        reasons.append("they asked for it while we were out")
+    if paid and now and (_num(r.get("price_change_pct")) or 0) >= 5:
+        reasons.append("the price is up %d%% since they last paid" % _num(r["price_change_pct"]))
+    if reasons and (pattern == "lapsed" or (_num(r.get("days_overdue")) or 0) > 0):
+        facts.append("possible reasons they have not reordered: " + " and ".join(reasons))
+
+    if str(r.get("is_in_stock")).lower() == "true":
+        facts.append("in stock now")
+    elif str(r.get("stock_is_known")).lower() == "true":
+        facts.append("out of stock now")
+
+    if str(r.get("is_on_promotion")).lower() == "true":
+        buy, free = _num(r.get("promo_buy_qty")), _num(r.get("promo_free_qty"))
+        promo = "on promotion"
+        if buy and free:
+            promo += ": buy %d get %d free" % (buy, free)
+        elif _num(r.get("promo_price")):
+            promo += " at %s" % _price(r["promo_price"])
+        if r.get("promo_end_date"):
+            promo += " until %s" % _day(r["promo_end_date"])
+        facts.append(promo)
+
+    return "%s; %s." % (head, "; ".join(facts)) if facts else head + "."
+
+
 # Lookups whose rows get a plain-language reading added before the model sees
 # them -- where the raw columns proved easy to misread.
 ROW_READERS = {
+    "lookup_pitch_list": read_pitch_item,
     "lookup_rep_sales": read_rep_sales,
     "lookup_accounts_to_call": read_account_rhythm,
     "lookup_winback_accounts": read_account_rhythm,
@@ -1190,9 +2318,26 @@ def labelled_rows(cols: list, rows: list) -> list:
     return out
 
 
+def with_today(messages: list) -> list:
+    """The messages with today's date added to the system prompt. The model has
+    no clock: without this, "this year" and "in three weeks" are guesses, and a
+    search for a festival's dates goes out with the year it was trained in."""
+    import datetime
+    today = datetime.date.today()
+    line = "Today is %s, %s %d, %d." % (today.strftime("%A"), today.strftime("%B"),
+                                         today.day, today.year)
+    out = list(messages)
+    if out and out[0].get("role") == "system" and isinstance(out[0].get("content"), str):
+        out[0] = dict(out[0], content=out[0]["content"] + "\n\n" + line)
+    else:
+        out.insert(0, {"role": "system", "content": line})
+    return out
+
+
 def call_upstream_llm(messages: list, model: str, max_tokens: int, tools: list) -> dict:
     """One non-streaming call to the real Gemma/vLLM host."""
-    body = {"model": model, "messages": messages, "max_tokens": max_tokens, "stream": False}
+    body = {"model": model, "messages": with_today(messages), "max_tokens": max_tokens,
+            "stream": False}
     if tools:
         body["tools"] = tools
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -1232,10 +2377,27 @@ def run_llm_with_tools(messages: list, model: str, max_tokens: int, rep: str = "
     from the lookups (see take_visuals); the answer comes back without them.
     """
     history = list(messages)
-    answer = _tool_loop(history, model, max_tokens, rep, before_lookup)
+    answer = without_tool_markup(_tool_loop(history, model, max_tokens, rep, before_lookup))
+    answer = fact_checked(answer, history, model, max_tokens, rep)
     if trace is not None:
         trace.extend(history[len(messages):])
+    angles = take_angles(answer)
+    leads = [name for a in angles for name in a["items"]] or take_leads(answer)
     answer, found = take_visuals(answer, history)
+    if leads:
+        answer = drop_dangling_intro(answer)
+    # A visit plan's card is built from this turn's rows, whatever the reply
+    # did or did not ask for, and takes the place of any picture it did ask for.
+    card = build_plan_card(history[len(messages):], leads, rep, angles, _evidence_text(history, rep))
+    if card and not angles and _plan_shown_before(messages, card):
+        # A follow-up that fetched the same store's plan again: the card is on
+        # the screen already, and sending it again with no angles only adds a
+        # second copy of everything below the answer.
+        card = None
+    if card:
+        found = [card]
+        sys.stderr.write("  VISUAL plan: %d angle(s) for this visit, %d more section(s)\n"
+                         % (len(card.get("featured") or []), len(card["sections"])))
     if visuals is not None:
         visuals.extend(found)
     return answer
@@ -1277,7 +2439,13 @@ def _place_words(text: str) -> str:
 
 def _tool_loop(history: list, model: str, max_tokens: int, rep: str, before_lookup) -> str:
     """run_llm_with_tools' loop, appending every exchange to `history`."""
-    tools = [openai_tool_schema(s) for s in tool_specs()]
+    # lookup_visit_plan replaces the pitch list for "what should I pitch": its due
+    # and win-back sections are the pitch list's own rows. Offering both, the
+    # model would reach for the old one-list answer.
+    tools = [openai_tool_schema(s) for s in tool_specs() if s["name"] != "lookup_pitch_list"]
+    tools += [VISIT_PLAN_TOOL, CHECK_PRODUCT_TOOL, PLAN_ITEM_TOOL]
+    if search_key():
+        tools.append(WEB_SEARCH_TOOL)
 
     for _ in range(LLM_PROXY_MAX_ROUNDS):
         completion = call_upstream_llm(history, model, max_tokens, tools)
@@ -1316,7 +2484,14 @@ def _tool_loop(history: list, model: str, max_tokens: int, rep: str, before_look
                 args = json.loads(fn.get("arguments") or "{}")
             except ValueError:
                 args = {}
-            return fn.get("name") or "", args.get("value") or ""
+            if not isinstance(args, dict):
+                return fn.get("name") or "", ""
+            # Single-value tools take "value", but next to check_store_product's
+            # customer_key the model sent lookup_visit_plan {customer_key: ...}:
+            # read as blank, refused three times, and the call ran out of rounds.
+            value = args.get("value") or next(
+                (v for v in args.values() if isinstance(v, str) and v.strip()), "")
+            return fn.get("name") or "", value
 
         # "Let me check" before a question back to the rep would be a promise
         # of a lookup that is not going to happen.
@@ -1330,7 +2505,29 @@ def _tool_loop(history: list, model: str, max_tokens: int, rep: str, before_look
                 sys.stderr.write("  TOOL %s(%r) blocked: start city not said\n" % (name, value))
                 history.append({"role": "tool", "tool_call_id": call.get("id"), "content": ASK_FOR_START})
                 continue
-            result = run_tool_call(name, value, rep)
+            if name == "web_search":
+                result = web_search(value, history, rep)
+            elif name == "lookup_visit_plan":
+                result = lookup_visit_plan(value, rep)
+            elif name == "check_store_product":
+                try:
+                    args = json.loads((call.get("function") or {}).get("arguments") or "{}")
+                except ValueError:
+                    args = {}
+                value = "%s: %s" % (args.get("customer_key"), args.get("product_words"))
+                result = check_store_product(args if isinstance(args, dict) else {}, rep)
+            elif name == "lookup_plan_item":
+                try:
+                    args = json.loads((call.get("function") or {}).get("arguments") or "{}")
+                except ValueError:
+                    args = {}
+                args = args if isinstance(args, dict) else {}
+                value = "%s: %s" % (args.get("customer_key"), args.get("item"))
+                result = lookup_plan_item(args, rep)
+            else:
+                result = run_tool_call(name, value, rep)
+                if name in SEASON_CHECK_TOOLS and search_key() and not searched(history):
+                    result = with_season_check(result)
             # One line per lookup, because when an answer is wrong the first
             # question is always which tool ran and what it was asked for.
             # Rows counted rather than printed: they are customer data, and
@@ -1338,7 +2535,9 @@ def _tool_loop(history: list, model: str, max_tokens: int, rep: str, before_look
             try:
                 parsed = json.loads(result)
                 outcome = (parsed.get("error") or "%d row(s)"
-                           % len(parsed.get("rows") or []))
+                           % len(parsed.get("rows") or parsed.get("results") or parsed.get("matches")
+                                 or parsed.get("found")
+                                 or [i for s in (parsed.get("ideas") or {}).values() for i in s]))
             except ValueError:
                 outcome = "unreadable"
             sys.stderr.write("  TOOL %s(%r) as %s -> %s\n"
@@ -1349,10 +2548,22 @@ def _tool_loop(history: list, model: str, max_tokens: int, rep: str, before_look
                 "content": result,
             })
 
-    # Out of rounds with the model still asking for tools. Saying the lookup
-    # failed is wrong -- they may well have succeeded -- so say what is true.
-    sys.stderr.write("  TOOL loop hit the %d-round cap without an answer\n"
+    # Out of rounds with the model still asking for tools. The lookups may well
+    # have found everything: "find the store, check the festival, get the
+    # pitch list" is three rounds before a word is said. One more turn with no
+    # tools on offer makes it answer from what it has.
+    sys.stderr.write("  TOOL loop hit the %d-round cap; answering from what it has\n"
                      % LLM_PROXY_MAX_ROUNDS)
+    try:
+        completion = call_upstream_llm(history, model, max_tokens, [])
+        message = ((completion.get("choices") or [{}])[0]).get("message") or {}
+        answer = (message.get("content") or "").strip()
+        if answer:
+            return answer
+    except UpstreamError as exc:
+        sys.stderr.write("  LLM proxy: last answer failed: %s\n" % exc)
+    # Saying the lookup failed is wrong -- they may well have succeeded -- so
+    # say what is true.
     return ("I looked that up but could not put an answer together. "
             "Could you ask me a slightly simpler question?")
 
