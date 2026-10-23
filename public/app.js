@@ -19,7 +19,10 @@ const el = {
   errorClose: $("errorClose"),
   agentSelect: $("agentSelect"),
   agentIdInput: $("agentIdInput"),
-  connSelect: $("connSelect"),
+  modelSelect: $("modelSelect"),
+  settingsClose: $("settingsClose"),
+  agentGroup: $("agentGroup"),
+  debugDownload: $("debugDownload"),
   keyNote: $("keyNote"),
   llmNote: $("llmNote"),
   orb: $("orb"),
@@ -286,7 +289,6 @@ function render() {
   el.muteBtn.title = state.muted ? "Unmute microphone" : "Mute microphone";
   el.agentSelect.disabled = live;
   el.agentIdInput.disabled = live;
-  el.connSelect.disabled = live;
 }
 
 function setStatus(status) {
@@ -385,7 +387,9 @@ function handleResponsePart(part) {
 async function startConversation() {
   clearError();
   const agentId = currentAgentId();
-  const connectionType = el.connSelect.value;
+  // WebSocket, always: it is the connection every part of this app has been
+  // tested on. The WebRTC option was a choice no rep needed to make.
+  const connectionType = "websocket";
 
   if (!agentId) {
     showError("No agent ID. Open settings and pick an agent, or set ELEVENLABS_AGENT_ID in .env.");
@@ -818,6 +822,21 @@ el.volumeSlider.addEventListener("input", applyVolume);
 el.settingsBtn.addEventListener("click", () => {
   el.settingsPanel.hidden = !el.settingsPanel.hidden;
 });
+el.settingsClose.addEventListener("click", () => {
+  el.settingsPanel.hidden = true;
+});
+
+// A placeholder until a second model exists: the choice is remembered, and
+// the server still answers with the on-site one.
+try {
+  const savedModel = localStorage.getItem("convai.model");
+  if (savedModel && [...el.modelSelect.options].some((o) => o.value === savedModel && !o.disabled)) {
+    el.modelSelect.value = savedModel;
+  }
+} catch { /* storage blocked: the default is fine */ }
+el.modelSelect.addEventListener("change", () => {
+  try { localStorage.setItem("convai.model", el.modelSelect.value); } catch { /* not worth telling */ }
+});
 
 el.errorClose.addEventListener("click", clearError);
 
@@ -1110,6 +1129,36 @@ el.debugClear.addEventListener("click", () => {
   el.debugCount.textContent = "0";
 });
 
+// The log as a file to attach to a support message, with what support asks
+// first -- which agent, which rep, which browser -- at the top.
+el.debugDownload.addEventListener("click", () => {
+  const now = new Date();
+  const rep = el.repSelect && el.repSelect.selectedOptions[0] ? el.repSelect.selectedOptions[0].textContent : "";
+  const agent = el.agentSelect.selectedOptions[0] ? el.agentSelect.selectedOptions[0].textContent : "";
+  const header = [
+    `U.S. Trading sales assistant - event log`,
+    `Saved:   ${now.toLocaleString("en-US")}`,
+    `Agent:   ${agent} (${currentAgentId() || "none"})`,
+    `Rep:     ${rep}`,
+    `Model:   ${el.modelSelect.selectedOptions[0] ? el.modelSelect.selectedOptions[0].textContent : ""}`,
+    `Call:    ${state.conversationId || "-"}`,
+    `Details: ${logDetail ? "on" : "off"}`,
+    `Browser: ${navigator.userAgent}`,
+    "",
+  ];
+  const blob = new Blob([header.concat(logLines).join("\n") + "\n"], { type: "text/plain" });
+  const stamp = now.toISOString().slice(0, 16).replace(/[-:T]/g, "");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `voice-log-${stamp}.txt`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 2000);
+  el.debugDownload.textContent = "Saved";
+  setTimeout(() => (el.debugDownload.textContent = "Download"), 1500);
+});
+
 window.addEventListener("beforeunload", () => {
   if (state.conversation) state.conversation.endSession();
 });
@@ -1143,6 +1192,12 @@ async function loadReps() {
     el.repSelect.replaceChildren(option);
     el.repSelect.value = option.value;
     el.repSelect.hidden = true;
+    // Nor does a PDA rep pick the agent: that is set up for them. And no sign
+    // out: the app signed in for them, and they have no password to come back.
+    if (el.agentGroup) el.agentGroup.hidden = true;
+    const signOut = document.getElementById("signOut");
+    if (signOut) signOut.hidden = true;
+    el.keyNote.textContent = `Signed in on the PDA as ${option.textContent}.`;
     const shown = document.createElement("div");
     shown.className = "rep-locked";
     shown.textContent = option.textContent;

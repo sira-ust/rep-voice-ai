@@ -317,11 +317,33 @@ body {
   gap: 12px;
 }
 
-.settings-grid {
+.settings-head { display: flex; align-items: center; justify-content: space-between; }
+.settings-title { margin: 0; font-size: 15px; font-weight: 700; color: var(--text); }
+
+/* One group per concern: agent, model, logs. */
+.settings-group {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
+.settings-group[hidden] { display: none; }
+.settings-group-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--pda-navy);
+}
+.settings-advanced > summary { cursor: pointer; font-size: 12px; color: var(--text-2); }
+.settings-advanced[open] > summary { margin-bottom: 6px; }
+.settings .debug-actions { flex-wrap: wrap; }
+.settings-footer { margin: 0; }
+.settings-account { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.settings-account a.btn-mini { text-decoration: none; white-space: nowrap; }
+.settings-account a[hidden] { display: none; }
+.field select option:disabled { color: var(--text-3); }
 
 .field { display: grid; gap: 5px; min-width: 0; }
 .field-wide { grid-column: 1 / -1; }
@@ -648,8 +670,15 @@ input[type="range"]::-moz-range-thumb {
   flex: none;
 }
 
-/* Inside the settings card: keep the border that groups it, drop the fill. */
-.settings .debug { background: transparent; }
+/* Inside the settings card it is one of the groups: no box of its own. */
+.settings .debug {
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  overflow: visible;
+}
+.settings .debug-head { padding: 0; }
 
 .debug-head {
   display: flex;

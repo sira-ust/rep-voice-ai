@@ -46,31 +46,49 @@
       </button>
     </div>
 
-    <section class="settings" id="settingsPanel" hidden>
-      <div class="settings-grid">
+    <section class="settings" id="settingsPanel" hidden aria-labelledby="settingsTitle">
+      <div class="settings-head">
+        <h2 class="settings-title" id="settingsTitle">Settings</h2>
+        <button class="btn-mini" id="settingsClose">Done</button>
+      </div>
+
+      <!-- Which ElevenLabs agent to talk to. Hidden on a PDA, where the rep
+           does not choose: the page is locked to them and to this agent. -->
+      <section class="settings-group" id="agentGroup">
+        <h3 class="settings-group-title">Agent</h3>
         <div class="field">
           <label for="agentSelect">Agent</label>
           <select id="agentSelect"></select>
         </div>
+        <details class="settings-advanced">
+          <summary>Advanced: agent ID</summary>
+          <div class="field">
+            <label for="agentIdInput">Agent ID</label>
+            <input id="agentIdInput" type="text" spellcheck="false" placeholder="agent_…" />
+          </div>
+        </details>
+        <p class="note" id="llmNote"></p>
+      </section>
+
+      <!-- A placeholder: the server answers with the on-site model for now.
+           The choice is where a second model will be picked once it exists. -->
+      <section class="settings-group">
+        <h3 class="settings-group-title">AI model</h3>
         <div class="field">
-          <label for="connSelect">Transport</label>
-          <select id="connSelect">
-            <option value="websocket">WebSocket</option>
-            <option value="webrtc">WebRTC</option>
+          <label for="modelSelect">Model</label>
+          <select id="modelSelect">
+            <option value="gemma" selected>Gemma 4 · on-site</option>
+            <option value="claude" disabled>Claude · coming soon</option>
           </select>
         </div>
-        <div class="field field-wide">
-          <label for="agentIdInput">Agent ID</label>
-          <input id="agentIdInput" type="text" spellcheck="false" placeholder="agent_…" />
-        </div>
-      </div>
-      <div class="notes">
-        <p class="note" id="llmNote"></p>
-        <p class="note" id="keyNote"></p>
-      </div>
+        <p class="note">Only the on-site model is available for now. Conversations stay on
+          U.S. Trading's own servers.</p>
+      </section>
+
       <!-- The event log is here, behind the gear: on the main screen it was
            either outside the CT70 frame on a desktop or missing on the device. -->
-      <section class="debug">
+      <section class="settings-group debug">
+        <h3 class="settings-group-title">Logs</h3>
         <div class="debug-head">
           <button class="debug-toggle" id="debugToggle" aria-expanded="false">
             <span class="debug-caret" aria-hidden="true">
@@ -81,15 +99,28 @@
             Event log
             <span class="debug-count" id="debugCount">0</span>
           </button>
-          <div class="debug-actions">
-            <span class="debug-stat" id="debugStat"></span>
-            <button class="btn-mini" id="debugDetail" aria-pressed="false"
-                    title="Include message text and tool payloads in the log">Details off</button>
-            <button class="btn-mini" id="debugCopy">Copy</button>
-            <button class="btn-mini" id="debugClear">Clear</button>
-          </div>
+          <span class="debug-stat" id="debugStat"></span>
+        </div>
+        <div class="debug-actions">
+          <button class="btn-mini" id="debugDetail" aria-pressed="false"
+                  title="Include message text and tool payloads in the log">Details off</button>
+          <button class="btn-mini" id="debugCopy">Copy</button>
+          <button class="btn-mini" id="debugDownload">Download</button>
+          <button class="btn-mini" id="debugClear">Clear</button>
         </div>
         <pre class="debug-log" id="debugLog" hidden></pre>
+        <p class="note">For troubleshooting: copy or download the log and send it to support.
+          With details on, it includes what was said, which can name customers.</p>
+      </section>
+
+      <!-- Sign out is for a computer: on a PDA the app signs in for the rep,
+           who has no password to sign back in with, so it is hidden there. -->
+      <section class="settings-group">
+        <h3 class="settings-group-title">Account</h3>
+        <div class="settings-account">
+          <p class="note settings-footer" id="keyNote"></p>
+          <a class="btn-mini" id="signOut" href="/logout">Sign out</a>
+        </div>
       </section>
     </section>
 
