@@ -4,7 +4,7 @@
 // for a short-lived conversation token / signed URL and hands it to the SDK.
 
 import { Conversation } from "https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.25.0/+esm";
-import { renderVisual } from "/visuals.js";
+import { renderVisual, visualToText } from "/visuals.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -19,7 +19,10 @@ const el = {
   errorClose: $("errorClose"),
   agentSelect: $("agentSelect"),
   agentIdInput: $("agentIdInput"),
-  connSelect: $("connSelect"),
+  modelSelect: $("modelSelect"),
+  settingsClose: $("settingsClose"),
+  agentGroup: $("agentGroup"),
+  debugDownload: $("debugDownload"),
   keyNote: $("keyNote"),
   llmNote: $("llmNote"),
   orb: $("orb"),
@@ -46,6 +49,7 @@ const el = {
   debugDetail: $("debugDetail"),
   debugCopy: $("debugCopy"),
   debugClear: $("debugClear"),
+  copyTranscript: $("copyTranscript"),
 };
 
 const state = {
@@ -285,7 +289,6 @@ function render() {
   el.muteBtn.title = state.muted ? "Unmute microphone" : "Mute microphone";
   el.agentSelect.disabled = live;
   el.agentIdInput.disabled = live;
-  el.connSelect.disabled = live;
 }
 
 function setStatus(status) {
@@ -384,7 +387,9 @@ function handleResponsePart(part) {
 async function startConversation() {
   clearError();
   const agentId = currentAgentId();
-  const connectionType = el.connSelect.value;
+  // WebSocket, always: it is the connection every part of this app has been
+  // tested on. The WebRTC option was a choice no rep needed to make.
+  const connectionType = "websocket";
 
   if (!agentId) {
     showError("No agent ID. Open settings and pick an agent, or set ELEVENLABS_AGENT_ID in .env.");
@@ -440,6 +445,7 @@ async function startConversation() {
       log("err", "scope token failed", err.message || String(err));
     }
     openLiveTranscript(callId);
+    state.callId = callId;
 
     state.conversation = await Conversation.startSession({
       ...auth,
@@ -450,6 +456,7 @@ async function startConversation() {
 
       onConnect: ({ conversationId }) => {
         log("cb", "onConnect", conversationId);
+        state.conversationId = conversationId;
         setStatus("connected");
         addMessage(`Connected · ${conversationId}`, "system");
         startMeter();
@@ -490,14 +497,24 @@ async function startConversation() {
           // the rep start a new bubble.
           state.live.node = null;
           state.live.visuals = [];        // confirmed: they stay with this turn
+          // ElevenLabs' copy is what was actually spoken. Kept on the bubble
+          // beside the screen text, for "Copy conversation" -- a visit plan's
+          // summary is spoken, its details only shown.
+          let answered;
           if (state.live.reply && state.live.reply.isConnected) {
+            answered = state.live.reply;
+            state.live.reply.dataset.spoken = message;
             state.live.reply = null;
           } else if (state.streaming.node) {
+            answered = state.streaming.node;
             state.streaming.node.textContent = message;
+            state.streaming.node.dataset.spoken = message;
             state.streaming = { id: null, node: null, text: "" };
           } else {
-            addMessage(message, "ai");
+            answered = addMessage(message, "ai");
+            answered.dataset.spoken = message;
           }
+          addFeedbackRow(answered);
         }
         renderDebugStats();
       },
@@ -505,6 +522,7 @@ async function startConversation() {
       onModeChange: ({ mode }) => {
         log("cb", "onModeChange", mode);
         state.mode = mode;
+        holdMicWhileSpeaking(mode);
         render();
       },
 
@@ -715,6 +733,10 @@ function showVisual(visual) {
   if (!card) return;
   logDetailed("in", "live visual", `${visual.type}: ${visual.title || ""}`);
   el.transcript.appendChild(card);
+  // The rating row belongs below the whole answer, card included.
+  if (state.feedbackRow && card.previousElementSibling === state.feedbackRow) {
+    el.transcript.appendChild(state.feedbackRow);
+  }
   // Only an unconfirmed turn's picture can still be withdrawn.
   if (state.live.reply) state.live.visuals.push(card);
   el.transcript.scrollTop = el.transcript.scrollHeight;
@@ -752,11 +774,41 @@ el.callBtn.addEventListener("click", () => {
   else if (state.status === "disconnected") startConversation();
 });
 
+// The agent heard itself: on a handheld or laptop speaker its reply came back
+// in through the microphone, was transcribed as the rep speaking, and answered.
+// Browser echo cancellation does not catch all of it. So the microphone is off
+// while the agent speaks and comes back a moment after it stops -- the tail of
+// the audio is still in the room. The rep's own mute button wins: a muted mic
+// stays muted. The cost is that the rep cannot talk over the agent; a headset
+// would allow that, and this is where to relax it if one is standard.
+const MIC_BACK_AFTER_MS = 450;
+let micBackTimer = null;
+
+function holdMicWhileSpeaking(mode) {
+  if (!state.conversation || typeof state.conversation.setMicMuted !== "function") return;
+  clearTimeout(micBackTimer);
+  try {
+    if (mode === "speaking") {
+      state.conversation.setMicMuted(true);
+    } else {
+      micBackTimer = setTimeout(() => {
+        try {
+          if (state.conversation && state.mode !== "speaking") state.conversation.setMicMuted(state.muted);
+        } catch { /* call ended in the meantime */ }
+      }, MIC_BACK_AFTER_MS);
+    }
+  } catch (err) {
+    log("err", "mic hold", err.message || String(err));
+  }
+}
+
 el.muteBtn.addEventListener("click", () => {
   if (!state.conversation) return;
   state.muted = !state.muted;
   try {
-    state.conversation.setMicMuted(state.muted);
+    // While the agent speaks the mic is held off regardless; the rep's choice
+    // takes effect when it stops.
+    if (state.mode !== "speaking") state.conversation.setMicMuted(state.muted);
     log("out", "setMicMuted", state.muted);
   } catch {
     showError("This SDK build does not support muting; end the call to stop the microphone.");
@@ -769,6 +821,21 @@ el.volumeSlider.addEventListener("input", applyVolume);
 
 el.settingsBtn.addEventListener("click", () => {
   el.settingsPanel.hidden = !el.settingsPanel.hidden;
+});
+el.settingsClose.addEventListener("click", () => {
+  el.settingsPanel.hidden = true;
+});
+
+// A placeholder until a second model exists: the choice is remembered, and
+// the server still answers with the on-site one.
+try {
+  const savedModel = localStorage.getItem("convai.model");
+  if (savedModel && [...el.modelSelect.options].some((o) => o.value === savedModel && !o.disabled)) {
+    el.modelSelect.value = savedModel;
+  }
+} catch { /* storage blocked: the default is fine */ }
+el.modelSelect.addEventListener("change", () => {
+  try { localStorage.setItem("convai.model", el.modelSelect.value); } catch { /* not worth telling */ }
 });
 
 el.errorClose.addEventListener("click", clearError);
@@ -813,6 +880,233 @@ el.debugDetail.addEventListener("click", () => {
 
 renderDetailToggle();
 
+// ---------------------------------------------------------------- rep feedback
+//
+// A thumbs up or down under each answer; a thumbs down asks what was wrong.
+// What is sent is what the rep saw -- the question, the answer as spoken and as
+// shown, the card -- so a bad answer can be traced back. One rating per answer,
+// changeable: a new rating keeps the same id and the latest counts.
+
+const FEEDBACK_REASONS = {
+  up: ["Useful idea", "Accurate", "Good timing"],
+  down: ["Wrong info", "Not useful", "Missed something", "Too long", "Wrong store or item"],
+};
+
+// Dictation uses the device's own speech-to-text where the browser has it
+// (Chrome on Android and desktop, Edge). It cannot share the microphone with a
+// live call, so during one the button says to tell the agent instead.
+const SpeechRecognizer = window.SpeechRecognition || window.webkitSpeechRecognition || null;
+
+function dictateInto(box, button, onUsed) {
+  if (!SpeechRecognizer) return null;
+  let rec = null;
+  button.addEventListener("click", () => {
+    if (state.status === "connected") {
+      button.title = "The call is using the microphone - just tell the agent your feedback";
+      note(button, "On a call: just tell the agent, e.g. \"Feedback: ...\"");
+      return;
+    }
+    if (rec) { rec.stop(); return; }
+    rec = new SpeechRecognizer();
+    rec.lang = "en-US";
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    button.setAttribute("aria-pressed", "true");
+    rec.onresult = (e) => {
+      const said = Array.from(e.results).map((r) => r[0].transcript).join(" ").trim();
+      if (said) {
+        box.value = (box.value ? `${box.value.trim()} ` : "") + said;
+        onUsed();
+      }
+    };
+    rec.onerror = (e) => log("err", "dictation", e.error || "failed");
+    rec.onend = () => { rec = null; button.setAttribute("aria-pressed", "false"); };
+    rec.start();
+  });
+  return button;
+}
+
+function note(near, text) {
+  const row = near.closest(".feedback");
+  const slot = row && row.querySelector(".feedback-note");
+  if (slot) slot.textContent = text;
+}
+
+function answerContext(reply) {
+  let question = "";
+  for (let n = reply.previousElementSibling; n; n = n.previousElementSibling) {
+    if (n.classList.contains("msg-user")) { question = n.textContent.trim(); break; }
+  }
+  const card = [];
+  for (let n = reply.nextElementSibling; n && !n.classList.contains("msg-user"); n = n.nextElementSibling) {
+    if (n.classList.contains("msg-visual") && n.visual) card.push(n.visual);
+  }
+  return {
+    question,
+    spoken: reply.dataset.spoken || "",
+    screen: reply.dataset.raw || reply.textContent || "",
+    card,
+  };
+}
+
+async function sendFeedback(reply, body) {
+  const rep = el.repSelect && el.repSelect.selectedOptions[0] ? el.repSelect.selectedOptions[0].textContent : "";
+  const payload = {
+    id: reply.dataset.feedbackId, call: state.callId || "", conversation: state.conversationId || "",
+    rep, at: new Date().toISOString(), ...answerContext(reply), ...body,
+  };
+  const res = await fetch("/api/feedback", {
+    method: "POST", credentials: "same-origin",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`feedback ${res.status}`);
+}
+
+function addFeedbackRow(reply) {
+  // Not under the greeting, which answers nothing.
+  let asked = false;
+  for (let n = reply.previousElementSibling; n; n = n.previousElementSibling) {
+    if (n.classList.contains("msg-user")) { asked = true; break; }
+  }
+  if (!asked || !reply.isConnected) return;
+  reply.dataset.feedbackId = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now() + Math.random());
+
+  const make = (tag, cls, text) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text) n.textContent = text;
+    return n;
+  };
+  const row = make("div", "feedback");
+  const up = make("button", "feedback-btn", "👍");
+  const down = make("button", "feedback-btn", "👎");
+  up.setAttribute("aria-label", "Helpful");
+  down.setAttribute("aria-label", "Not helpful");
+  const status = make("span", "feedback-note");
+  row.append(make("span", "feedback-ask", "Was this helpful?"), up, down, status);
+
+  // Both thumbs open the same box: what was good is as worth knowing as what was not.
+  const form = make("div", "feedback-form");
+  form.hidden = true;
+  const chipBox = make("div", "feedback-chips");
+  const comment = make("textarea", "feedback-comment");
+  comment.maxLength = 1000;
+  comment.rows = 2;
+  const tools = make("div", "feedback-tools");
+  const mic = make("button", "feedback-btn feedback-mic", "🎤");
+  mic.type = "button";
+  mic.setAttribute("aria-label", "Dictate");
+  mic.title = "Dictate your feedback";
+  const send = make("button", "btn-mini feedback-send", "Send");
+  form.append(chipBox, comment, tools);
+  row.append(form);
+
+  let rating = "";
+  let mode = "none";
+  if (dictateInto(comment, mic, () => { mode = "dictated"; })) tools.append(mic);
+  tools.append(send);
+  comment.addEventListener("input", () => { if (mode === "none") mode = "text"; });
+
+  const submit = async (body) => {
+    try {
+      await sendFeedback(reply, { rating, ...body });
+      status.textContent = "Thanks, noted";
+    } catch (err) {
+      status.textContent = "Couldn't send - try again";
+      log("err", "feedback", err.message || String(err));
+    }
+  };
+  const choose = (value) => {
+    rating = value;
+    up.setAttribute("aria-pressed", String(value === "up"));
+    down.setAttribute("aria-pressed", String(value === "down"));
+    chipBox.replaceChildren(...FEEDBACK_REASONS[value].map((label) => {
+      const chip = make("button", "feedback-chip", label);
+      chip.type = "button";
+      chip.setAttribute("aria-pressed", "false");
+      chip.addEventListener("click", () => {
+        chip.setAttribute("aria-pressed", chip.getAttribute("aria-pressed") === "true" ? "false" : "true");
+      });
+      return chip;
+    }));
+    comment.placeholder = value === "up" ? "What made it useful? (optional)" : "What would have helped? (optional)";
+    form.hidden = false;
+    // The thumb alone is saved straight away; a note sent after updates it.
+    submit({ mode: "none" });
+    el.transcript.scrollTop = el.transcript.scrollHeight;
+  };
+  up.addEventListener("click", () => choose("up"));
+  down.addEventListener("click", () => choose("down"));
+  send.addEventListener("click", () => {
+    const reasons = Array.from(chipBox.children)
+      .filter((c) => c.getAttribute("aria-pressed") === "true").map((c) => c.textContent);
+    form.hidden = true;
+    submit({ reasons, comment: comment.value.trim(), mode: comment.value.trim() ? mode : "none" });
+  });
+
+  // Below the whole answer: its card often arrives before ElevenLabs confirms
+  // the reply, so the row goes after any card already there (and showVisual
+  // moves it down again for one that comes later).
+  let last = reply;
+  while (last.nextElementSibling && last.nextElementSibling.classList.contains("msg-visual")) {
+    last = last.nextElementSibling;
+  }
+  last.after(row);
+  state.feedbackRow = row;
+}
+
+/**
+ * The conversation as plain text: each turn as spoken, and as it appeared on
+ * screen when that differs -- a visit plan speaks a summary and shows the
+ * whole plan, and both belong in what a rep pastes into an email.
+ */
+function transcriptText() {
+  const rep = el.repSelect && el.repSelect.selectedOptions[0] ? el.repSelect.selectedOptions[0].textContent : "";
+  const when = new Date().toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+  const out = [`U.S. Trading sales assistant${rep ? ` - ${rep}` : ""} - ${when}`];
+  for (const item of el.transcript.children) {
+    if (item.classList.contains("guide")) continue;
+    if (item.classList.contains("msg-user")) {
+      out.push("", `You: ${item.textContent.trim()}`);
+    } else if (item.classList.contains("msg-ai")) {
+      const screen = (item.dataset.raw || item.textContent || "").trim();
+      const spoken = (item.dataset.spoken || "").trim();
+      const flat = (s) => s.replace(/[*=]/g, "").replace(/\s+/g, " ").trim();
+      if (spoken && flat(spoken) !== flat(screen)) {
+        out.push("", `Agent (spoken): ${spoken}`, "", `Agent (on screen):\n${screen}`);
+      } else {
+        out.push("", `Agent: ${screen || spoken}`);
+      }
+    } else if (item.classList.contains("msg-visual") && item.visual) {
+      out.push("", "On screen:", visualToText(item.visual));
+    } else if (item.classList.contains("msg-system")) {
+      out.push("", `(${item.textContent.trim()})`);
+    }
+  }
+  return out.join("\n");
+}
+
+el.copyTranscript.addEventListener("click", async () => {
+  const text = transcriptText();
+  try {
+    await navigator.clipboard.writeText(text);
+    el.copyTranscript.textContent = "Copied";
+  } catch {
+    // No clipboard permission (an older handheld browser): a hidden text box
+    // and the old copy command still work there.
+    const box = document.createElement("textarea");
+    box.value = text;
+    box.style.position = "fixed";
+    box.style.opacity = "0";
+    document.body.appendChild(box);
+    box.select();
+    const ok = document.execCommand && document.execCommand("copy");
+    box.remove();
+    el.copyTranscript.textContent = ok ? "Copied" : "Copy failed";
+  }
+  setTimeout(() => (el.copyTranscript.textContent = "Copy conversation"), 1500);
+});
+
 el.debugCopy.addEventListener("click", async () => {
   const text = logLines.join("\n");
   try {
@@ -835,6 +1129,36 @@ el.debugClear.addEventListener("click", () => {
   el.debugCount.textContent = "0";
 });
 
+// The log as a file to attach to a support message, with what support asks
+// first -- which agent, which rep, which browser -- at the top.
+el.debugDownload.addEventListener("click", () => {
+  const now = new Date();
+  const rep = el.repSelect && el.repSelect.selectedOptions[0] ? el.repSelect.selectedOptions[0].textContent : "";
+  const agent = el.agentSelect.selectedOptions[0] ? el.agentSelect.selectedOptions[0].textContent : "";
+  const header = [
+    `U.S. Trading sales assistant - event log`,
+    `Saved:   ${now.toLocaleString("en-US")}`,
+    `Agent:   ${agent} (${currentAgentId() || "none"})`,
+    `Rep:     ${rep}`,
+    `Model:   ${el.modelSelect.selectedOptions[0] ? el.modelSelect.selectedOptions[0].textContent : ""}`,
+    `Call:    ${state.conversationId || "-"}`,
+    `Details: ${logDetail ? "on" : "off"}`,
+    `Browser: ${navigator.userAgent}`,
+    "",
+  ];
+  const blob = new Blob([header.concat(logLines).join("\n") + "\n"], { type: "text/plain" });
+  const stamp = now.toISOString().slice(0, 16).replace(/[-:T]/g, "");
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `voice-log-${stamp}.txt`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(link.href), 2000);
+  el.debugDownload.textContent = "Saved";
+  setTimeout(() => (el.debugDownload.textContent = "Download"), 1500);
+});
+
 window.addEventListener("beforeunload", () => {
   if (state.conversation) state.conversation.endSession();
 });
@@ -855,6 +1179,29 @@ async function loadReps() {
     data = await getJSON("/api/reps");
   } catch (err) {
     showRepNote("Could not load the rep list: " + (err.message || err));
+    return;
+  }
+  // Opened by the PDA for the rep signed in on it: their name, no list, and no
+  // "All reps". The server holds the same lock, so this is how it looks, not
+  // what enforces it.
+  if (data.locked) {
+    const rep = data.locked;
+    const option = document.createElement("option");
+    option.value = rep.name || "";
+    option.textContent = rep.name ? `${rep.name} (${rep.code})` : `Sales ID ${rep.code}`;
+    el.repSelect.replaceChildren(option);
+    el.repSelect.value = option.value;
+    el.repSelect.hidden = true;
+    // Nor does a PDA rep pick the agent: that is set up for them. And no sign
+    // out: the app signed in for them, and they have no password to come back.
+    if (el.agentGroup) el.agentGroup.hidden = true;
+    const signOut = document.getElementById("signOut");
+    if (signOut) signOut.hidden = true;
+    el.keyNote.textContent = `Signed in on the PDA as ${option.textContent}.`;
+    const shown = document.createElement("div");
+    shown.className = "rep-locked";
+    shown.textContent = option.textContent;
+    el.repSelect.after(shown);
     return;
   }
   // An empty picker and a failed lookup look the same from the outside, and

@@ -1,0 +1,53 @@
+  call id: EMMY2Ay3RRyIMlHWro4i9A
+
+You: Seeing Hmong Legacy next week. What should I pitch them?
+
+Agent (spoken by ElevenLabs): Let me check. Still checking. They have the Hmong New Year coming up in 9 days, so you might want to suggest jasmine rice, sweet rice, or soy sauce. They are also due for some items like their Alum cooking pot and prawn crackers, and we have some Hmong steamers at a lower price than they last paid. Which of those angles do you want to focus on for the visit?
+
+Agent (on screen):
+Let me check. Still checking. They have the Hmong New Year coming up in 9 days, so you might want to suggest jasmine rice, sweet rice, or soy sauce. They are also due for some items like their Alum cooking pot and prawn crackers, and we have some Hmong steamers at a lower price than they last paid.
+
+Which of those angles do you want to focus on for the visit?
+
+On screen (card):
+Visit plan: Hmong Legacy Market LLC, Madison
+FOR THIS VISIT
+  Rice and soy sauce for Hmong New Year, 9 days away
+    - Jasmine rice (Dragonfly): for Hmong New Year (Oct 31, 2026, in 9 days); stores that celebrate it buy 6.2x usual beforehand; they buy it; price up 12% since they last paid
+        . Dragonfly Brand Jasmine Rice 2026
+        . Dragonfly Brand Jasmine Rice 2026
+        . Dragonfly Thai Jasmine Rice (8X5Lbs)
+    - Sweet rice (Dragonfly, Apple): for Hmong New Year (Oct 31, 2026, in 9 days); stores that celebrate it buy 1.8x usual beforehand; they buy it; price up 23% since they last paid
+        . Dragonfly Thai Sweet Rice (10X5Lbs)
+        . Apple (Usa) Sweet Rice
+    - Soy sauce (Kikkoman, Lkk): for Hmong New Year (Oct 31, 2026, in 9 days); stores that celebrate it buy 1.4x usual beforehand; they buy it
+        . Kikkoman Soy Sauce(10Oz)
+        . Lkk Soy Sauce
+        . Kikkoman Soy Sauce (Lite) 64Oz
+  Cheaper than last time
+    - Hmong steamer (Alum): buys 2.8x its usual amount in the next 5 weeks; price down 17% since they last paid
+        . Alum Hmong Steamer (28Cm)
+MORE IDEAS (collapsed)
+  - Hmong New Year (Oct 31, 2026)
+  - Their season: they buy more of these in the next 5 weeks
+  - Cheaper than they last paid
+  - On promotion
+  - Back in stock
+  - Our stock is running low: order now
+  - Similar stores buy it; they never have
+  - Our own brand instead
+  - Instead of what we are out of
+  - Buying less lately
+  - Due now
+  - Win-backs
+  - New or trending in what they buy
+  - Staples
+
+You: What else could I bring up with them?
+
+Agent (spoken by ElevenLabs): Since they are a regular but have been lapsing, you might consider bringing up the Dragonfly instant noodles that are back in stock or the Maekrua oyster sauce which is also back. You could also mention the Meiji Panda snacks since the prices have come down. Would you like me to check the details for any of those?
+
+Agent (on screen):
+Since they are a regular but have been lapsing, you might consider bringing up the Dragonfly instant noodles that are back in stock or the Maekrua oyster sauce which is also back. You could also mention the Meiji Panda snacks since the prices have come down. Would you like me to check the details for any of those?
+
+  conversation: conv_9001m5jyswh8emt8nbekxhdeaw0w 

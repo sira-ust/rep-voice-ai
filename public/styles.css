@@ -317,11 +317,33 @@ body {
   gap: 12px;
 }
 
-.settings-grid {
+.settings-head { display: flex; align-items: center; justify-content: space-between; }
+.settings-title { margin: 0; font-size: 15px; font-weight: 700; color: var(--text); }
+
+/* One group per concern: agent, model, logs. */
+.settings-group {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
+.settings-group[hidden] { display: none; }
+.settings-group-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--pda-navy);
+}
+.settings-advanced > summary { cursor: pointer; font-size: 12px; color: var(--text-2); }
+.settings-advanced[open] > summary { margin-bottom: 6px; }
+.settings .debug-actions { flex-wrap: wrap; }
+.settings-footer { margin: 0; }
+.settings-account { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.settings-account a.btn-mini { text-decoration: none; white-space: nowrap; }
+.settings-account a[hidden] { display: none; }
+.field select option:disabled { color: var(--text-3); }
 
 .field { display: grid; gap: 5px; min-width: 0; }
 .field-wide { grid-column: 1 / -1; }
@@ -348,6 +370,18 @@ body {
   width: 100%;
   min-width: 0;
 }
+
+/* The PDA's rep, in place of the picker: shown, not chosen. */
+.rep-locked {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--pda-strip);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+}
+.field select[hidden] { display: none; }
 
 .field input { font-family: var(--mono); font-size: 12.5px; }
 
@@ -636,8 +670,15 @@ input[type="range"]::-moz-range-thumb {
   flex: none;
 }
 
-/* Inside the settings card: keep the border that groups it, drop the fill. */
-.settings .debug { background: transparent; }
+/* Inside the settings card it is one of the groups: no box of its own. */
+.settings .debug {
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  overflow: visible;
+}
+.settings .debug-head { padding: 0; }
 
 .debug-head {
   display: flex;
@@ -972,6 +1013,65 @@ input[type="range"]::-moz-range-thumb {
 .vline-axis { font-size: 9.5px; fill: var(--text-2); font-family: var(--font); }
 
 /* table: scrolls sideways inside the card, never the page */
+/* Rating under each answer: small, out of the way, big enough for a thumb. */
+.feedback { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -2px 0 2px 4px; font-size: 12px; color: var(--text-2); }
+.feedback-btn {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
+  min-width: 40px; height: 32px; font-size: 15px; cursor: pointer;
+}
+.feedback-btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.feedback-note { font-size: 11.5px; color: var(--text-2); }
+.feedback-form { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+.feedback-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.feedback-chip {
+  font: inherit; font-size: 11.5px; padding: 5px 9px; border-radius: 999px; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--line); color: var(--text);
+}
+.feedback-chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.feedback-comment {
+  font: inherit; font-size: 12.5px; padding: 6px 8px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--text); resize: vertical;
+}
+.feedback-tools { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.feedback-mic { font-size: 14px; }
+.feedback-mic[aria-pressed="true"] { border-color: var(--danger); background: rgba(214, 88, 79, 0.12); }
+
+.transcript-tools {
+  display: flex;
+  justify-content: flex-end;
+  padding: 6px 14px 0;
+  background: var(--bg);
+}
+
+/* Visit plan: every section the server built, the agent's lead picks marked. */
+.vplan-note { margin: 0 0 8px; font-size: 12px; color: var(--text-2); }
+.vplan-featured { border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 8px; padding: 8px 10px; }
+.vplan-kicker { margin: 0 0 4px; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
+.vplan-featured .vplan-items li.lead { background: transparent; padding-left: 8px; }
+.vplan-more { margin-top: 10px; }
+.vplan-more > summary { cursor: pointer; font-size: 12.5px; font-weight: 650; color: var(--pda-navy); padding: 4px 0; }
+.vplan-more[open] > summary { margin-bottom: 4px; }
+.vplan-section + .vplan-section { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+.vplan-head { margin: 0 0 4px; font-size: 12.5px; font-weight: 650; color: var(--pda-navy); }
+.vplan-dish { margin: 6px 0 2px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+.vplan-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.vplan-items li { font-size: 12.5px; padding-left: 8px; border-left: 3px solid transparent; }
+.vplan-items li.lead { border-left-color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 3px 6px 3px 8px; }
+.vplan-items li.warn { opacity: 0.7; }
+.vplan-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.vplan-detail { color: var(--text-2); font-size: 12px; line-height: 1.35; }
+.vplan-tag {
+  font-size: 10.5px; font-weight: 700; color: var(--accent);
+  border: 1px solid var(--accent); border-radius: 999px; padding: 0 6px;
+}
+.vplan-tag-warn { color: var(--warn-text); border-color: var(--warn); }
+.vplan-brands { font-size: 12px; color: var(--text-2); }
+.vplan-brands::before { content: "· "; }
+.vplan-sizes { margin-top: 2px; }
+.vplan-sizes > summary { cursor: pointer; font-size: 11.5px; color: var(--accent); }
+.vplan-children { list-style: none; margin: 3px 0 0; padding: 0 0 0 10px; display: flex; flex-direction: column; gap: 3px; }
+.vplan-child-name { font-size: 12px; font-weight: 600; }
+
 .vtable-wrap { overflow-x: auto; }
 .vtable { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 .vtable th {

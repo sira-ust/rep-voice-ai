@@ -326,7 +326,86 @@ function map(v) {
   return wrap;
 }
 
-const DRAW = { bar, pie, line, table, map };
+// ---------------------------------------------------------------- visit plan
+//
+// Every section of a store's visit plan, built by the server from the night's
+// rows. The voice gives a summary; this is the whole of it, so nothing the
+// agent had no time to say is lost. The agent's lead picks are marked.
+
+// A family line -- "Sweet rice · Dragonfly, Apple" and its reason -- with the
+// sizes and brands behind it one tap away: the rep picks what suits the store.
+function planItems(items) {
+  const list = node("ul", "vplan-items");
+  for (const it of items || []) {
+    const li = node("li", it.lead ? "lead" : it.warn ? "warn" : null);
+    const head = node("div", "vplan-item");
+    head.append(node("strong", null, it.label || ""));
+    if (it.brands) head.append(node("span", "vplan-brands", it.brands));
+    if (it.lead) head.append(node("span", "vplan-tag", "Lead with"));
+    if (it.warn) head.append(node("span", "vplan-tag vplan-tag-warn", "Out of stock"));
+    li.append(head);
+    // A single item's detail opens with its name, already shown in bold.
+    const detail = Array.isArray(it.children) ? it.detail || "" : (it.detail || "").replace(/^[^:]*:\s*/, "");
+    if (detail) li.append(node("div", "vplan-detail", detail));
+    if (Array.isArray(it.children) && it.children.length) {
+      const sizes = node("details", "vplan-sizes");
+      const n = it.children.length;
+      sizes.append(node("summary", null, n === 1 ? "1 item" : `${n} items`));
+      const sub = node("ul", "vplan-children");
+      for (const c of it.children) {
+        const row = node("li", c.warn ? "warn" : null);
+        row.append(node("span", "vplan-child-name", c.label || ""));
+        const d = (c.detail || "").replace(/^[^:]*:\s*/, "");
+        if (d) row.append(node("div", "vplan-detail", d));
+        sub.append(row);
+      }
+      sizes.append(sub);
+      li.append(sizes);
+    }
+    list.append(li);
+  }
+  return list;
+}
+
+function planSection(sec) {
+  const part = node("section", "vplan-section");
+  part.append(node("h4", "vplan-head", sec.title || ""));
+  if (Array.isArray(sec.groups)) {
+    for (const group of sec.groups) {
+      if (group.title) part.append(node("p", "vplan-dish", group.title));
+      part.append(planItems(group.items));
+    }
+  } else {
+    part.append(planItems(sec.items));
+  }
+  return part;
+}
+
+// The angles the agent chose for this store come first; every other idea is
+// one tap away under "More ideas" -- there, not in the way.
+function plan(v) {
+  const featured = Array.isArray(v.featured) ? v.featured : [];
+  const more = Array.isArray(v.sections) ? v.sections : [];
+  if (!featured.length && !more.length) return null;
+  const box = node("div", "vplan");
+  if (v.note) box.append(node("p", "vplan-note", v.note));
+  if (featured.length) {
+    const top = node("div", "vplan-featured");
+    top.append(node("p", "vplan-kicker", "For this visit"));
+    featured.forEach((sec) => top.append(planSection(sec)));
+    box.append(top);
+  }
+  if (more.length) {
+    const fold = node("details", "vplan-more");
+    if (!featured.length) fold.open = true;
+    fold.append(node("summary", null, `More ideas (${more.length})`));
+    more.forEach((sec) => fold.append(planSection(sec)));
+    box.append(fold);
+  }
+  return box;
+}
+
+const DRAW = { bar, pie, line, table, map, plan };
 
 /** A finished card for `visual`, or null if there is nothing to draw. */
 export function renderVisual(visual) {
@@ -337,5 +416,58 @@ export function renderVisual(visual) {
   const card = node("figure", "msg msg-visual");
   if (visual.title) card.append(node("figcaption", "visual-title", visual.title));
   card.append(body);
+  card.visual = visual;     // kept for copying the conversation as text
   return card;
+}
+
+/** A visual as plain text, for pasting into an email or a chat. */
+export function visualToText(v) {
+  if (!v) return "";
+  const lines = v.title ? [v.title] : [];
+  const items = (list, indent) => (list || []).forEach((it) => {
+    const tags = [it.lead ? "LEAD WITH" : "", it.warn ? "OUT OF STOCK" : ""].filter(Boolean).join(", ");
+    const family = Array.isArray(it.children);
+    const detail = family ? it.detail || "" : (it.detail || "").replace(/^[^:]*:\s*/, "");
+    const brands = it.brands ? ` (${it.brands})` : "";
+    lines.push(`${indent}- ${it.label}${brands}${tags ? ` [${tags}]` : ""}${detail ? `: ${detail}` : ""}`);
+    if (family) {
+      for (const c of it.children) {
+        const d = (c.detail || "").replace(/^[^:]*:\s*/, "");
+        lines.push(`${indent}    · ${c.label}${d ? `: ${d}` : ""}`);
+      }
+    }
+  });
+  if (v.type === "plan") {
+    if (v.note) lines.push(v.note);
+    const section = (sec) => {
+      lines.push("", `  ${sec.title}`);
+      if (Array.isArray(sec.groups)) {
+        for (const g of sec.groups) {
+          if (g.title) lines.push(`    ${g.title}`);
+          items(g.items, "      ");
+        }
+      } else {
+        items(sec.items, "    ");
+      }
+    };
+    if ((v.featured || []).length) {
+      lines.push("", "FOR THIS VISIT");
+      v.featured.forEach(section);
+    }
+    if ((v.sections || []).length) {
+      lines.push("", "MORE IDEAS");
+      v.sections.forEach(section);
+    }
+  } else if (v.type === "table") {
+    lines.push("  " + v.columns.map((c) => humanise(c.name)).join(" | "));
+    for (const row of v.rows) lines.push("  " + row.map((cell, i) => formatValue(cell, v.columns[i].format)).join(" | "));
+  } else if (v.type === "map") {
+    for (const p of v.points || []) lines.push(`  - ${p.label}${p.detail ? `: ${p.detail}` : ""}`);
+  } else if (Array.isArray(v.labels) && Array.isArray(v.series)) {
+    v.labels.forEach((label, i) => {
+      const values = v.series.map((s) => `${v.series.length > 1 ? `${s.name}: ` : ""}${formatValue(s.values[i], s.format)}`);
+      lines.push(`  - ${label}: ${values.join(", ")}`);
+    });
+  }
+  return lines.join("\n");
 }

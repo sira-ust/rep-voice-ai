@@ -4,3 +4,6 @@ __pycache__/
 .proxy-previous.json
 .proxy-previous.*.json
 .env.test
+
+# Rep feedback kept here when Databricks cannot be reached; it holds customer data.
+feedback.jsonl

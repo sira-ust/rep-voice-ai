@@ -1,0 +1,39 @@
+holiday,community,date_varies,2026,2027,2028,2029,note
+New Year's Day,American / All,no,,1/1/2027,1/1/2028,1/1/2029,
+Día de los Reyes Magos,Hispanic,no,,1/6/2027,1/6/2028,1/6/2029,
+Lunar New Year / Tết / Seollal,Chinese / Vietnamese / Korean,no,,2/6/2027,1/26/2028,2/13/2029,
+Presidents' Day,American,no,,2/15/2027,2/21/2028,2/19/2029,
+Eid al-Fitr / Hari Raya,Malay / Indonesian / Muslim,yes,,3/9/2027,2/26/2028,2/14/2029,
+Holi,Indian / Hindu,yes,,3/22/2027,3/11/2028,3/1/2029,
+Good Friday,Filipino / Hispanic / Christian,no,,3/26/2027,4/14/2028,3/30/2029,
+Easter Sunday,Filipino / Hispanic / Christian,no,,3/28/2027,4/16/2028,4/1/2029,
+Songkran (Thai New Year),Thai,no,,4/13/2027,4/13/2028,4/13/2029,
+Thingyan (Burmese New Year),Burmese,no,,4/13/2027,4/13/2028,4/13/2029,
+Lao New Year (Pi Mai),Lao,no,,4/14/2027,4/14/2028,4/14/2029,
+Khmer New Year,Cambodian,yes,,4/14/2027,4/14/2028,4/14/2029,
+Vaisakhi / Baisakhi,Indian / Sikh / Punjabi,no,,4/14/2027,4/13/2028,4/14/2029,
+Cinco de Mayo,Mexican American,no,,5/5/2027,5/5/2028,5/5/2029,
+Mother's Day (U.S.),American / All,no,,5/9/2027,5/14/2028,5/13/2029,
+Mother's Day (Mexico),Mexican / Hispanic,no,,5/10/2027,5/10/2028,5/10/2029,
+Eid al-Adha,Muslim,yes,,5/16/2027,5/5/2028,4/24/2029,
+Memorial Day,American,no,,5/31/2027,5/29/2028,5/28/2029,
+Independence Day (July 4th),American,no,,7/4/2027,7/4/2028,7/4/2029,
+Raksha Bandhan,Indian / Hindu,yes,,8/17/2027,8/5/2028,8/23/2029,
+Labor Day,American,no,,9/6/2027,9/4/2028,9/3/2029,
+Chuseok (Korean Thanksgiving),Korean,no,,9/14/2027,10/2/2028,9/21/2029,
+Mid-Autumn Festival / Tết Trung Thu,Chinese / Vietnamese,no,,9/15/2027,10/3/2028,9/22/2029,
+Mexican Independence Day,Mexican,no,,9/16/2027,9/16/2028,9/16/2029,
+Pchum Ben,Cambodian,yes,,9/29/2027,9/17/2028,10/6/2029,
+Navratri (Start),Indian / Hindu,yes,,9/30/2027,9/19/2028,10/8/2029,
+Dussehra,Indian / Hindu,yes,,10/9/2027,9/28/2028,10/17/2029,
+Thadingyut Festival of Lights,Burmese,yes,10/25/2026,10/14/2027,10/2/2028,10/21/2029,2026 drafted by Claude: sources split between Oct 25 and Oct 27 -- confirm
+Diwali / Deepavali,Indian / Malaysian / Singaporean Hindu,yes,11/8/2026,10/29/2027,10/17/2028,11/5/2029,2026 drafted by Claude: most sources give Nov 8 -- confirm
+Día de los Muertos,Mexican,no,11/1/2026,11/1/2027,11/1/2028,11/1/2029,
+Loy Krathong,Thai,yes,11/24/2026,11/13/2027,11/1/2028,11/20/2029,2026 drafted by Claude: some sources give Nov 25 for the main night -- confirm
+Boun That Luang,Lao,yes,11/24/2026,11/13/2027,11/1/2028,11/20/2029,2026 drafted by Claude: not confirmed by any source; same full moon as Loy Krathong -- confirm
+Guru Nanak Gurpurab,Indian / Sikh,yes,11/24/2026,11/14/2027,11/2/2028,11/21/2029,2026 drafted by Claude: sources agree on Nov 24
+Thanksgiving,American,no,11/26/2026,11/25/2027,11/23/2028,11/22/2029,
+Hmong New Year,Hmong,yes,12/1/2026,12/1/2027,12/1/2028,12/1/2029,Local celebrations vary by city (Madison 2026: Oct 31 - Nov 1)
+Christmas Eve / Nochebuena,Filipino / Hispanic / American,no,12/24/2026,12/24/2027,12/24/2028,12/24/2029,
+Christmas Day,Filipino / Hispanic / American,no,12/25/2026,12/25/2027,12/25/2028,12/25/2029,
+New Year's Eve,Filipino / Hispanic / American,no,12/31/2026,12/31/2027,12/31/2028,12/31/2029,
