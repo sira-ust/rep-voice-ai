@@ -1132,6 +1132,23 @@ async function loadReps() {
     showRepNote("Could not load the rep list: " + (err.message || err));
     return;
   }
+  // Opened by the PDA for the rep signed in on it: their name, no list, and no
+  // "All reps". The server holds the same lock, so this is how it looks, not
+  // what enforces it.
+  if (data.locked) {
+    const rep = data.locked;
+    const option = document.createElement("option");
+    option.value = rep.name || "";
+    option.textContent = rep.name ? `${rep.name} (${rep.code})` : `Sales ID ${rep.code}`;
+    el.repSelect.replaceChildren(option);
+    el.repSelect.value = option.value;
+    el.repSelect.hidden = true;
+    const shown = document.createElement("div");
+    shown.className = "rep-locked";
+    shown.textContent = option.textContent;
+    el.repSelect.after(shown);
+    return;
+  }
   // An empty picker and a failed lookup look the same from the outside, and
   // the person who can fix it is the one staring at the page.
   if (!(data.reps || []).length) {

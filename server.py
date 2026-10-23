@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import hmac
+import html
 import json
 import mimetypes
 import os
@@ -3032,6 +3033,9 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(body, dict) or body.get("rating") not in ("up", "down"):
             self._json(400, {"error": "Bad request."})
             return
+        locked = self._locked_rep()
+        if locked:
+            body["rep"] = locked["name"] or locked["code"]
         record = feedback_record(body, user)
         threading.Thread(target=save_feedback, args=(record,), daemon=True).start()
         self._json(200, {"ok": True})
@@ -3057,6 +3061,43 @@ class Handler(BaseHTTPRequestHandler):
             return None
         morsel = jar.get(auth.SESSION_COOKIE)
         return auth.read_session(morsel.value) if morsel else None
+
+    def _locked_rep(self) -> dict | None:
+        """The rep this session is locked to (the PDA's), or None for an open
+        session -- an admin or tester picking from the list."""
+        raw = self.headers.get("Cookie", "")
+        try:
+            jar = http.cookies.SimpleCookie()
+            jar.load(raw)
+        except http.cookies.CookieError:
+            return None
+        morsel = jar.get(auth.SESSION_COOKIE)
+        code = auth.read_session_rep(morsel.value) if morsel else ""
+        if not code:
+            return None
+        # A code the directory no longer lists still locks: to nobody's data.
+        return rep_by_code(code) or {"code": code, "name": ""}
+
+    def _session_cookie(self, value: str) -> str:
+        return "%s=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Strict%s" % (
+            auth.SESSION_COOKIE, value, auth.session_lifetime(), "" if INSECURE_COOKIE else "; Secure")
+
+    def _lock_to_rep(self, userid: str) -> None:
+        """A new session for the same user, locked to the rep the PDA named.
+        A different ID on a shared PDA replaces the last rep's lock."""
+        rep = rep_by_code(userid)
+        if not rep:
+            # Locked all the same -- to a code that matches no rep, so it reads
+            # no one's data. Left open, the same session reloaded without the
+            # ID would have shown the full rep list.
+            self._audit("pda_rep_unknown", userid)
+            self._send(403, auth.login_page(
+                "Sales ID %s is not recognised. Ask your manager to check it." % html.escape(userid)),
+                "text/html; charset=utf-8",
+                [("Set-Cookie", self._session_cookie(auth.issue_session(self._user(), "?" + userid)))])
+            return
+        self._audit("pda_rep", "%s (%s)" % (rep["code"], rep["name"]))
+        self._redirect("/", [("Set-Cookie", self._session_cookie(auth.issue_session(self._user(), rep["code"])))])
 
     def _audit(self, action: str, detail: str = "") -> None:
         sys.stderr.write("  AUDIT user=%s ip=%s %s %s\n" % (
@@ -3085,6 +3126,20 @@ class Handler(BaseHTTPRequestHandler):
             self._redirect("/login", [(
                 "Set-Cookie",
                 "%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict" % auth.SESSION_COOKIE)])
+            return
+
+        # Opened by the PDA for the rep signed in on it (?userid=032): lock the
+        # session to that rep. Signed out, the ID is kept across the login
+        # page rather than dropped -- dropping it left an expired PDA session
+        # on the open rep list.
+        userid = (query.get("userid") or [""])[0].strip()[:20]
+        if userid and route in ("/", "/index.html"):
+            if not self._user():
+                self._redirect("/login", [(
+                    "Set-Cookie", "%s=%s; Path=/; Max-Age=600; HttpOnly; SameSite=Strict"
+                    % (PENDING_REP_COOKIE, urllib.parse.quote(userid)))])
+            else:
+                self._lock_to_rep(userid)
             return
 
         # Everything past here needs a session.
@@ -3165,19 +3220,30 @@ class Handler(BaseHTTPRequestHandler):
         # now for the extra head start. Debounced, so this costs nothing when
         # the session-start warm-up has already run.
         warm_warehouse("login")
-        cookie = "%s=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Strict%s" % (
-            auth.SESSION_COOKIE, auth.issue_session(username),
-            auth.session_lifetime(), "" if INSECURE_COOKIE else "; Secure")
         # Back to the page that sent them here, if it was one of ours.
         jar = http.cookies.SimpleCookie()
         try:
             jar.load(self.headers.get("Cookie") or "")
         except http.cookies.CookieError:
             pass
+        # The PDA opened the page for a rep while the sign-in had expired: the
+        # rep's ID waited here, so the session is locked to them from the start
+        # and they never see the open rep list.
+        pending = urllib.parse.unquote(jar[PENDING_REP_COOKIE].value) if PENDING_REP_COOKIE in jar else ""
+        rep = rep_by_code(pending) if pending else None
+        if rep:
+            sys.stderr.write("  AUDIT user=%s ip=%s pda_rep %s (%s)\n"
+                             % (username, self._client(), rep["code"], rep["name"]))
+        # An ID the directory does not know still locks, to no one's data.
+        cookie = self._session_cookie(auth.issue_session(
+            username, rep["code"] if rep else ("?" + pending if pending else "")))
         wanted = "/" + (jar[AFTER_LOGIN_COOKIE].value if AFTER_LOGIN_COOKIE in jar else "")
         target = wanted if _RETURN_PAGE.match(wanted) else "/"
+        if pending and not rep:
+            target = "/?userid=" + urllib.parse.quote(pending)     # shows "not recognised"
         self._redirect(target, [("Set-Cookie", cookie), (
-            "Set-Cookie", "%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict" % AFTER_LOGIN_COOKIE)])
+            "Set-Cookie", "%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict" % AFTER_LOGIN_COOKIE), (
+            "Set-Cookie", "%s=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict" % PENDING_REP_COOKIE)])
 
     def _stream_live(self, call: str) -> None:
         """Server-sent events for one call: the rep's words as the proxy gets them.
@@ -3248,12 +3314,15 @@ class Handler(BaseHTTPRequestHandler):
             # for a scope naming anything, and the signature would make it
             # look authoritative.
             wanted = (query.get("rep") or [""])[0].strip()
-            if wanted and wanted not in {r["name"] for r in sales_reps()}:
+            locked = self._locked_rep()
+            if locked:
+                # A PDA session reads one rep's data, whatever the page asks
+                # for: the rep comes from the signed session, not the query.
+                # A lock to a code no longer in the directory reads nobody's.
+                wanted = locked["name"] or "(sales ID %s)" % locked["code"]
+            elif wanted and wanted not in {r["name"] for r in sales_reps()}:
                 self._json(400, {"error": "Unknown rep"})
                 return
-            # TODO: once sign-in maps a user to a rep, take the rep from the
-            # session instead of the query string. The proxy side does not
-            # change -- it already trusts only what this endpoint signed.
             call = live_open(self._user())
             self._json(200, {"scopeToken": auth.issue_scope(wanted, call=call),
                              "rep": wanted, "callId": call})
@@ -3276,6 +3345,12 @@ class Handler(BaseHTTPRequestHandler):
             # empty list is reported with its reason: the picker falling back
             # to "All" on its own looks identical to a company with no reps,
             # and the difference matters to whoever has to fix it.
+            locked = self._locked_rep()
+            if locked:
+                # The PDA's rep and no one else: the page shows their name
+                # in place of the list.
+                self._json(200, {"reps": [locked], "locked": locked})
+                return
             reps = sales_reps()
             payload = {"reps": reps}
             if not reps:
@@ -3599,6 +3674,16 @@ class Handler(BaseHTTPRequestHandler):
 # Where sign-in returns to: one of our own pages, by name, and nothing else --
 # a free-form "next" is how a login page becomes an open redirect.
 AFTER_LOGIN_COOKIE = "after_login"
+PENDING_REP_COOKIE = "pending_rep"
+
+
+def rep_by_code(code: str) -> dict | None:
+    """The active rep with this sales code, "32" and "032" alike, or None."""
+    want = str(code or "").strip().upper()
+    if not want:
+        return None
+    norm = lambda c: str(int(c)) if str(c).isdigit() else str(c).strip().upper()  # noqa: E731
+    return next((r for r in sales_reps() if norm(r["code"]) == norm(want)), None)
 _RETURN_PAGE = re.compile(r"^/[A-Za-z0-9_-]+\.html$")
 
 

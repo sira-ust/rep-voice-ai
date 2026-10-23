@@ -136,9 +136,15 @@ def session_lifetime() -> int:
         return 12 * 3600
 
 
-def issue_session(username: str) -> str:
-    payload = json.dumps({"u": username, "exp": int(time.time()) + session_lifetime()},
-                         separators=(",", ":")).encode("utf-8")
+def issue_session(username: str, rep_code: str = "") -> str:
+    """A signed session cookie. `rep_code` locks the session to one sales rep
+    -- set when the PDA opens the page for the rep signed in on it, and from
+    then on the only rep whose data this session can read. It is signed with
+    the rest, so the page cannot change it."""
+    claims = {"u": username, "exp": int(time.time()) + session_lifetime()}
+    if rep_code:
+        claims["rep"] = rep_code
+    payload = json.dumps(claims, separators=(",", ":")).encode("utf-8")
     body = base64.urlsafe_b64encode(payload).decode().rstrip("=")
     sig = hmac.new(_secret(), body.encode("ascii"), hashlib.sha256).digest()
     return "%s.%s" % (body, base64.urlsafe_b64encode(sig).decode().rstrip("="))
@@ -146,6 +152,19 @@ def issue_session(username: str) -> str:
 
 def read_session(cookie_value: str | None) -> str | None:
     """Return the username if the cookie is validly signed and unexpired."""
+    claims = read_session_claims(cookie_value)
+    return claims["u"] if claims else None
+
+
+def read_session_rep(cookie_value: str | None) -> str:
+    """The rep code a valid session is locked to, or "" for an unlocked one."""
+    claims = read_session_claims(cookie_value)
+    rep = claims.get("rep") if claims else ""
+    return rep if isinstance(rep, str) else ""
+
+
+def read_session_claims(cookie_value: str | None) -> dict | None:
+    """The claims of a validly signed, unexpired session for a known user."""
     if not cookie_value or "." not in cookie_value:
         return None
     body, _, sig_b64 = cookie_value.rpartition(".")
@@ -162,10 +181,9 @@ def read_session(cookie_value: str | None) -> str | None:
         claims = json.loads(base64.urlsafe_b64decode(pad(body)))
     except (ValueError, TypeError):
         return None
-    if int(claims.get("exp", 0)) < time.time():
+    if not isinstance(claims, dict) or int(claims.get("exp", 0)) < time.time():
         return None
-    name = claims.get("u")
-    return name if name in users() else None
+    return claims if claims.get("u") in users() else None
 
 
 def issue_scope(rep: str, seconds: int = 4 * 3600, call: str = "") -> str:

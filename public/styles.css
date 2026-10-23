@@ -349,6 +349,18 @@ body {
   min-width: 0;
 }
 
+/* The PDA's rep, in place of the picker: shown, not chosen. */
+.rep-locked {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--pda-strip);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+}
+.field select[hidden] { display: none; }
+
 .field input { font-family: var(--mono); font-size: 12.5px; }
 
 .field input:focus,

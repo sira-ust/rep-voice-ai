@@ -10,10 +10,21 @@ permanent public HTTPS address, and a restart ends any call in progress.
 
 ## Known limitations (test phase)
 
-- **Any signed-in user can view any rep's accounts.** They pick the rep from
-  the page's list. That is fine while only testers can sign in, but the rep
-  must come from the sign-in before reps get access (the `TODO` in
-  `/api/scope`).
+- **On the PDA, the rep comes from the PDA.** The PDA app signs in with a
+  built-in account and opens `/?userid=<sales code>` for the rep signed in on
+  the device. That locks the session to the rep, in the signed session cookie:
+  their name instead of the rep list, and only their accounts, enforced by the
+  server whatever the page asks for. An unknown code gets "not recognised" and
+  reads no one's data; a different code on a shared PDA replaces the lock.
+  Each lock is logged (`AUDIT ... pda_rep`).
+- **That `userid` is trusted as given.** The built-in account's password is the
+  only protection: anyone holding it could open the site in a browser and pass
+  any `userid`, or use the rep list. Acceptable for a few internal reps; before
+  a wider rollout, have the PDA sign the `userid` (HMAC with a shared secret
+  and a timestamp) so a leaked password alone is not enough.
+- **Without `userid`** -- a browser on a computer -- sign-in and the rep list
+  work as before, for admins and testers. A tester who has opened a `userid`
+  link stays locked until they sign out (`/logout`).
 - **One rollback file for all agents.** `configure_proxy.py` saves a single
   `.proxy-previous.json`. Before switching a second agent from the same
   machine, run `--off` on the first, or delete the file.
