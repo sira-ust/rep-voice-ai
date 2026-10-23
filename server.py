@@ -1031,13 +1031,17 @@ VISIT_GUIDE = (
     "win-back is a win-back, never a holiday item. If one of upcoming_holidays is "
     "celebrated by the community this store serves and the occasion section is empty, "
     "check two or three key ingredients with check_store_product, all in one go, before "
-    "recommending any. Then speak a short summary: one sentence per angle, naming the "
-    "item and the reason a rep would give, and say the rest is on their screen. Lead with "
-    "the reason to buy; a price rise is something to handle, never the reason to pitch. "
-    "Do not read lists aloud. End with your angles, item names exactly as they appear "
-    "above, on their own lines, like this:\n```plan\n"
-    "[{\"angle\": \"Hmong New Year is 9 days away\", \"items\": [\"Df Thai Sweet Rice (10X5Lbs)\"]},\n"
-    " {\"angle\": \"Cheaper than last time\", \"items\": [\"Alum Hmong Steamer (28Cm)\"]}]\n```")
+    "recommending any. Then speak a short summary: one sentence per angle, giving the "
+    "product family and its brands and the reason -- \"sweet rice, DF and Apple, and "
+    "jasmine rice\" -- never an exact item name or size: the rep knows which size suits "
+    "the store, and the sizes are on the screen. Offer ideas, not instructions, and leave "
+    "the rep room to judge; you might close by asking which of the angles fits this "
+    "store best, rather than offering to check stock. Lead with the reason to buy; a "
+    "price rise is something to handle, never the reason to pitch. Do not read lists "
+    "aloud. End with your angles, families named as they appear above, on their own "
+    "lines, like this:\n```plan\n"
+    "[{\"angle\": \"Rice for Hmong New Year, 9 days away\", \"items\": [\"Sweet rice\", \"Jasmine rice\"]},\n"
+    " {\"angle\": \"Cheaper than last time\", \"items\": [\"Hmong steamer\"]}]\n```")
 
 VISIT_PLAN_TOOL = {
     "type": "function",
@@ -1232,9 +1236,13 @@ def lookup_visit_plan(value: str, rep: str = "") -> str:
     for r in rows:
         extra = ({"holiday": r["holiday"], "holiday_date": r.get("holiday_date"), "dish": r.get("dish"),
                   "days_until": r.get("days_until")} if r.get("holiday") else {})
+        case_n = _num(r.get("case_qty"))
+        pack = " · ".join(x for x in (
+            ("%s of %d" % (r.get("price_unit") or "case", case_n)) if case_n else "",
+            _price(r["price_now"]) if _num(r.get("price_now")) else "") if x)
         full.setdefault(r["section"], []).append({
-            "item": _title_case(r.get("item_label")), "detail": read_plan_item(r),
-            "can_lead": _is_true(r.get("can_lead")), **extra})
+            "item": _title_case(r.get("item_label")), "detail": read_plan_item(r), "why": plan_reason(r),
+            "pack": pack, "can_lead": _is_true(r.get("can_lead")), **extra})
         slim.setdefault(r["section"], []).append({
             "item": _title_case(r.get("item_label")), "why": plan_reason(r), **extra})
     first = rows[0]
@@ -1261,8 +1269,15 @@ def lookup_visit_plan(value: str, rep: str = "") -> str:
                     if acct.get("days_since_last_order") else "no ordering rhythm on record"),
         "possible_reasons_account_is_slowing": slowing_reasons(rows) or ["nothing in the data points to one"],
         "store_holidays": [{"holiday": h, "date": d, "days_until": n} for d, h, n in holidays],
-        "ideas": {titles[n]: slim[n][:PLAN_ITEMS_TO_MODEL] if n != "occasion" else slim[n]
-                  for n in order if n in slim},
+        # By product family: "Sweet rice (Dragonfly, Apple): <why>" -- what the
+        # rep pitches -- with how many sizes sit behind it.
+        "ideas": {titles[n]: [
+            {"family": g["family"], "brands": g["brands"], "why": g["members"][0]["why"],
+             "items": len(g["members"]),
+             **({"holiday": g["members"][0]["holiday"], "days_until": g["members"][0].get("days_until")}
+                if g["members"][0].get("holiday") else {})}
+            for g in by_family(slim[n])][:PLAN_ITEMS_TO_MODEL if n != "occasion" else None]
+            for n in order if n in slim},
         "details": "Each item's full facts are on the rep's screen; for one item's facts "
                    "in a later answer, use lookup_plan_item.",
         "before_you_answer": VISIT_GUIDE,
@@ -1271,6 +1286,90 @@ def lookup_visit_plan(value: str, rep: str = "") -> str:
 
 _plan_lock = threading.Lock()
 _plan_cache: dict[tuple, dict] = {}
+
+
+# ------------------------------------------------------------------ product families
+#
+# Reps pitch "sweet rice -- DF and Apple", not "DF Thai Sweet Rice (10X5LBS)":
+# they know which size suits which store, and a list of exact items reads as
+# instructions rather than ideas. So items are grouped by what the product is,
+# with the brand and the codes in front of the name read the way the sales team
+# reads them, and the sizes kept underneath.
+
+# Codes at the start of an item name (from the sales team), longest first.
+LABEL_PREFIXES = (
+    ("FZ DF", "Dragonfly", "frozen"), ("FZ (DF)", "Dragonfly", "frozen"), ("FZ(DF)", "Dragonfly", "frozen"),
+    ("DFZ", "", "discontinued frozen"), ("FZ", "", "frozen"), ("DF", "Dragonfly", ""),
+    ("DRAGONFLY", "Dragonfly", ""), ("HBB", "Honey Bee", ""), ("HB", "Honey Bee", ""), ("CG", "Chung Guang", ""),
+)
+KNOWN_BRANDS = ("APPLE", "PINK LOTUS", "AROY D", "AROY-D", "CHAOKOH", "MAMA", "KIKKOMAN", "LKK", "JHC", "TAS",
+                "TASCO", "THREE CRAB", "RED BOAT", "PANTAI", "SQUID", "ERAWAN", "MAEKRUA", "MOGU MOGU", "COZY",
+                "FOCO", "HONEYBEE", "KHS", "NESTLE", "MAGGI", "TEANS", "TEAN'S", "VITAMILK", "SAMYANG", "G7",
+                "KIWI", "ALUM", "BLACK & WHITE", "NORA", "BB", "999", "LAURIAT", "MEIJI", "KYJ", "SUNAREE",
+                "JOYLUCK", "NS", "LION & GLOBE", "ANGEL", "OCEAN", "WAN JA SHAN", "LEE KUM KEE")
+_PACK_WORDS = {"can", "bottle", "btl", "pkg", "pkt", "pkts", "pack", "pk", "box", "bag", "jar", "carton", "bulk",
+               "large", "small", "medium", "l", "m", "s", "xl", "xs", "reg", "regular", "n/c", "nc",
+               "oz", "lb", "lbs", "g", "kg", "ml", "cm", "pcs", "pc", "ct"}
+_SIZE_WORD = re.compile(r"^\d+(\.\d+)?([x/]\d+)*(oz|lb|lbs|g|kg|ml|l|cm|pc|pcs|pk|ct|n)?$", re.I)
+_VARIETY_WORDS = {"thai", "usa", "brand", "pure", "premium", "original", "new", "hot", "spicy", "mild", "lite",
+                  "light", "dark", "super", "extra", "fresh", "family", "jumbo", "baby", "whole", "sliced",
+                  "slice", "strip", "tip"}
+_PRODUCT_NOUNS = {"rice", "noodle", "noodles", "sauce", "milk", "cream", "drink", "juice", "tea", "coffee", "soda",
+                  "sausage", "steamer", "pot", "oil", "mix", "broth", "paste", "flour", "sugar", "chili", "chips",
+                  "cracker", "crackers", "laver", "vermicelli", "bean", "beans", "shoot", "shoots", "jam", "powder",
+                  "seasoning", "vinegar", "candy", "cake", "snack", "water", "wine", "dessert", "jelly", "salt",
+                  "cookie", "wafer", "soup", "belly", "skin", "pho", "paper", "knife", "eggs", "egg", "syrup"}
+
+
+def product_family(label: str) -> tuple[str, str, list]:
+    """("Sweet rice", "Dragonfly", []) for "DF THAI SWEET RICE (10X5LBS)":
+    what the product is, its brand, and flags such as frozen."""
+    text = " ".join(str(label or "").upper().split())
+    brand, flags = "", []
+    for code, name, flag in LABEL_PREFIXES:
+        if text == code or text.startswith(code + " "):
+            brand, text = name, text[len(code):].strip()
+            flags += [flag] if flag else []
+            break
+    text = re.sub(r"\([^)]*\)?", " ", text)          # (10X5LBS) (L) (USA) -- and an unclosed one
+    words = [w for w in re.findall(r"[A-Z0-9/'&.-]+", text)
+             if w.lower() not in _PACK_WORDS and not _SIZE_WORD.match(w) and not re.fullmatch(r"[\d.]+", w)]
+    rest = " ".join(words)
+    if not brand:
+        for b in sorted(KNOWN_BRANDS, key=len, reverse=True):
+            if rest == b or rest.startswith(b + " "):
+                brand, rest = b.title(), rest[len(b):].strip()
+                break
+    core = [w for w in rest.split() if w.lower() not in _VARIETY_WORDS]
+    nouns = [i for i, w in enumerate(core) if w.lower() in _PRODUCT_NOUNS]
+    # The product noun and up to two words before it ("coconut milk drink",
+    # "tom yum noodle"); a flavour after it ("noodle beef flavor") goes.
+    core = core[max(0, nouns[-1] - 2):nouns[-1] + 1] if nouns else core[-2:]
+    return (" ".join(core).capitalize() or _title_case(label)), brand, flags
+
+
+def display_name(label: str) -> str:
+    """An item's name with its codes read out: "Dragonfly Sugarcane Herbal
+    Drink (frozen)" for "FZ DF SUGARCANE HERBAL DRINK"."""
+    text = " ".join(str(label or "").split())
+    for code, name, flag in LABEL_PREFIXES:
+        if text.upper() == code or text.upper().startswith(code + " "):
+            rest = _title_case(text[len(code):].strip().upper())
+            return ("%s %s" % (name, rest) if name else rest) + (" (%s)" % flag if flag else "")
+    return _title_case(text)
+
+
+def by_family(entries: list) -> list:
+    """Entries of one section grouped by product family, in the section's own
+    order (the first member is the strongest)."""
+    groups: dict[str, dict] = {}
+    for e in entries:
+        fam, brand, _ = product_family(e["item"])
+        g = groups.setdefault(fam.lower(), {"family": fam, "brands": [], "members": []})
+        if brand and brand not in g["brands"]:
+            g["brands"].append(brand)
+        g["members"].append(e)
+    return list(groups.values())
 
 
 def plan_reason(r: dict) -> str:
@@ -1736,44 +1835,62 @@ def build_plan_card(turn: list, leads: list, rep: str = "", angles: list | None 
     plan = dict(plan, sections=cached["sections"] if cached else
                 {by_title.get(t, t): entries for t, entries in (plan.get("ideas") or {}).items()})
 
-    def item(entry):
-        return {"label": entry["item"], "detail": entry.get("detail") or entry.get("why") or "",
-                "lead": _is_lead(entry["item"], leads), "warn": not entry.get("can_lead", True)}
+    def family_line(group, lead=False):
+        """One product family as a card line -- "Sweet rice · Dragonfly, Apple",
+        its strongest member's reason -- with every size and brand under it."""
+        members = group["members"]
+        return {
+            "label": group["family"], "brands": ", ".join(group["brands"]),
+            "detail": members[0].get("why") or members[0].get("detail") or "",
+            "lead": lead or _is_lead(group["family"], leads) or any(_is_lead(m["item"], leads) for m in members),
+            "warn": all(not m.get("can_lead", True) for m in members),
+            # "case of 4 · $46" tells apart items whose names are the same
+            "children": [{"label": display_name(m["item"]) + (" (%s)" % m["pack"] if m.get("pack") else ""),
+                          "detail": m.get("detail") or m.get("why") or "",
+                          "warn": not m.get("can_lead", True)} for m in members],
+        }
 
-    # The model's angles, each item found by name in any section. A title with
-    # a figure the data does not hold falls back to its first item's section.
+    # Every section, by family; the model's checked holiday ideas with them.
+    families = [(name, g) for name, es in plan["sections"].items() for g in by_family(es)]
+    families += [("occasion", g) for c in checks for g in by_family(c["matches"])]
+
+    # The model's angles: each name it gave found as a family (or a member of
+    # one) in any section. A title with a figure the data does not hold falls
+    # back to its first family's section.
     featured = []
-    entries = [(name, e) for name, es in plan["sections"].items() for e in es]
-    entries += [("occasion", dict(m, holiday=c.get("occasion"))) for c in checks for m in c["matches"]]
+    seen = set()        # across angles: the steamer came up under two of them
     for angle in angles or []:
-        picked, seen = [], set()
+        picked = []
         for wanted in angle["items"]:
-            hit = next(((n, e) for n, e in entries if _is_lead(e["item"], [wanted])), None)
-            if hit and hit[1]["item"] not in seen:
-                seen.add(hit[1]["item"])
+            hit = next(((n, g) for n, g in families
+                        if _is_lead(g["family"], [wanted]) or _is_lead(wanted, [g["family"]])
+                        or any(_is_lead(m["item"], [wanted]) for m in g["members"])), None)
+            if hit and hit[1]["family"] not in seen:
+                seen.add(hit[1]["family"])
                 picked.append(hit)
         if not picked:
             continue
         title = angle["angle"]
         if evidence and unsupported_facts(title, evidence):
             title = dict(PLAN_SECTIONS).get(picked[0][0], title)
-        featured.append({"title": title, "items": [dict(item(e), lead=True) for _, e in picked]})
+        featured.append({"title": title, "items": [family_line(g, lead=True) for _, g in picked]})
 
     sections = []
     occasion = {}
     for entry in plan["sections"].get("occasion", []):
         occasion.setdefault((entry.get("holiday") or "Upcoming", entry.get("holiday_date") or ""), {}).setdefault(
-            entry.get("dish") or "", []).append(item(entry))
+            entry.get("dish") or "", []).append(entry)
     for check in checks:
         group = occasion.setdefault((check.get("occasion") or "Ideas checked", check.get("occasion_date") or ""), {})
-        group.setdefault(check.get("dish") or check.get("checked") or "", []).extend(
-            item(m) for m in check["matches"])
+        group.setdefault(check.get("dish") or check.get("checked") or "", []).extend(check["matches"])
     for (holiday, when), dishes in occasion.items():
         title = "%s%s" % (holiday, (" (%s)" % _day(when)) if when else "")
-        sections.append({"title": title, "groups": [{"title": d, "items": items} for d, items in dishes.items()]})
+        sections.append({"title": title, "groups": [
+            {"title": d, "items": [family_line(g) for g in by_family(es)]} for d, es in dishes.items()]})
     for name, title in PLAN_SECTIONS:
         if name != "occasion" and plan["sections"].get(name):
-            sections.append({"title": title, "items": [item(e) for e in plan["sections"][name]]})
+            sections.append({"title": title,
+                             "items": [family_line(g) for g in by_family(plan["sections"][name])]})
     store = plan["store"]
     # Only this store's own holidays, on the dates its plan uses -- not every
     # community's calendar, and not the calendar date where its city has one.
@@ -1784,6 +1901,131 @@ def build_plan_card(turn: list, leads: list, rep: str = "", angles: list | None 
             "note": ("This store's holidays coming up: " + upcoming) if upcoming else "",
             "featured": featured,
             "sections": sections}
+
+
+# ------------------------------------------------------------------ rep feedback
+#
+# A thumbs up or down under each answer, with reasons and a comment for a thumbs
+# down. Saved with everything needed to see what the rep saw: the question, the
+# answer as spoken and as shown, the card, and which lookups ran -- so a bad
+# answer can be traced, and a rep's correction ("Pink Lotus is jasmine rice")
+# becomes a change to the reference lists. Written to Databricks in the
+# background; if that fails, to a local file, so nothing a rep said is lost.
+
+FEEDBACK_TABLE = os.environ.get(
+    "FEEDBACK_TABLE", "ust_databricks.ust_reporting.voice_agent_feedback").strip()
+FEEDBACK_FILE = ROOT / "feedback.jsonl"
+FEEDBACK_MAX_BYTES = 96 * 1024
+FEEDBACK_REASONS = ("Wrong info", "Not useful", "Missed something", "Too long", "Wrong store or item",
+                    "Useful idea", "Accurate", "Good timing")
+_feedback_table_ready = False
+_feedback_lock = threading.Lock()
+
+
+def _clip(value, limit: int) -> str:
+    text = value if isinstance(value, str) else json.dumps(value) if value is not None else ""
+    return text[:limit]
+
+
+def feedback_record(body: dict, user: str) -> dict:
+    call = _clip(body.get("call"), 64)
+    spoken = _clip(body.get("spoken"), 4000)
+    # Which lookups produced this answer, from the call's own record of them.
+    lookups = []
+    with _live_lock:
+        entry = _live_calls.get(call) if call else None
+        kept = list((entry or {}).get("evidence") or [])
+    said = _flat(spoken)
+    for item in kept:
+        if item["key"] and item["key"][:40] in said:
+            for m in item["messages"]:
+                for c in m.get("tool_calls") or []:
+                    fn = c.get("function") or {}
+                    lookups.append("%s(%s)" % (fn.get("name"), _clip(fn.get("arguments"), 120)))
+            break
+    reasons = [r for r in (body.get("reasons") or []) if r in FEEDBACK_REASONS]
+    card = body.get("card")
+    store = ""
+    if isinstance(card, list) and card and isinstance(card[0], dict):
+        store = str(card[0].get("title") or "").replace("Visit plan: ", "")
+    return {
+        "feedback_id": _clip(body.get("id"), 64) or secrets.token_hex(8),
+        "user_name": user, "rep": _clip(body.get("rep"), 120), "call_id": call,
+        "conversation_id": _clip(body.get("conversation"), 64),
+        "rating": body["rating"], "reasons": ", ".join(reasons), "comment": _clip(body.get("comment"), 1000),
+        "question": _clip(body.get("question"), 2000), "answer_spoken": spoken,
+        "answer_screen": _clip(body.get("screen"), 6000), "card_json": _clip(card, 60000),
+        "store": store[:160], "lookups": "; ".join(lookups)[:4000],
+        "client_time": _clip(body.get("at"), 40),
+        "input_mode": body.get("mode") if body.get("mode") in ("none", "text", "dictated", "spoken") else "none",
+    }
+
+
+def save_feedback(record: dict) -> None:
+    global _feedback_table_ready
+    sys.stderr.write("  FEEDBACK %s from %s%s\n" % (record["rating"], record["user_name"],
+                                                    (" (%s)" % record["reasons"]) if record["reasons"] else ""))
+    columns = list(record)
+    try:
+        with _feedback_lock:
+            if not _feedback_table_ready:
+                dbx_records("CREATE TABLE IF NOT EXISTS %s (created_at TIMESTAMP, %s) COMMENT 'Reps rating the "
+                            "answers of the voice agent, one row per rating (a changed rating is a new row with "
+                            "the same feedback_id; the latest counts). Written by server.py.'"
+                            % (FEEDBACK_TABLE, ", ".join("%s STRING" % c for c in columns)), {})
+                # A column added since the table was made (input_mode) goes on the end.
+                have = {r.get("col_name") for r in dbx_records("DESCRIBE TABLE %s" % FEEDBACK_TABLE, {})}
+                missing = [c for c in columns if c not in have]
+                if missing:
+                    dbx_records("ALTER TABLE %s ADD COLUMNS (%s)"
+                                % (FEEDBACK_TABLE, ", ".join("%s STRING" % c for c in missing)), {})
+                _feedback_table_ready = True
+        dbx_records("INSERT INTO %s (created_at, %s) VALUES (current_timestamp(), %s)"
+                    % (FEEDBACK_TABLE, ", ".join(columns), ", ".join(":" + c for c in columns)), record)
+    except (common.Fail, OSError) as exc:
+        sys.stderr.write("  FEEDBACK not saved to Databricks (%s); kept in %s\n" % (exc, FEEDBACK_FILE.name))
+        with _feedback_lock, FEEDBACK_FILE.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(dict(record, created_at=time.strftime("%Y-%m-%dT%H:%M:%S"))) + "\n")
+
+
+SAVE_FEEDBACK_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "save_feedback",
+        "description": (
+            "Save the rep's feedback on your previous answer, good or bad. Use it when the "
+            "rep says \"feedback\", or tells you an answer was useful, spot on, wrong, missing "
+            "something, too long -- or corrects you (\"Pink Lotus is jasmine rice\"). Use "
+            "their own words for the comment. Afterwards thank them in a few words; do not "
+            "repeat the feedback back, and do not apologise at length."),
+        "parameters": {"type": "object", "required": ["rating", "comment"], "properties": {
+            "rating": {"type": "string", "enum": ["up", "down"],
+                       "description": "up if they liked the answer, down if not."},
+            "comment": {"type": "string", "description": "What they said, in their words."},
+        }},
+    },
+}
+
+
+def save_spoken_feedback(args: dict, history: list, rep: str, call: str) -> str:
+    """Feedback said to the agent during a call, saved against the answer it
+    is about: the last reply before this turn, and the question that got it."""
+    rating = args.get("rating") if args.get("rating") in ("up", "down") else "down"
+    answer, question = "", ""
+    for i in range(len(history) - 1, -1, -1):
+        m = history[i]
+        if m.get("role") == "assistant" and isinstance(m.get("content"), str) and m["content"].strip():
+            answer = m["content"]
+            for j in range(i - 1, -1, -1):
+                if history[j].get("role") == "user" and isinstance(history[j].get("content"), str):
+                    question = history[j]["content"]
+                    break
+            break
+    record = feedback_record({"rating": rating, "comment": args.get("comment"), "question": question,
+                              "spoken": answer, "screen": answer, "rep": rep, "call": call,
+                              "mode": "spoken"}, "voice: " + (rep or "unknown"))
+    threading.Thread(target=save_feedback, args=(record,), daemon=True).start()
+    return json.dumps({"saved": True, "note": "Thank the rep in a few words and carry on."})
 
 
 def _num_or_none(value):
@@ -2360,7 +2602,7 @@ def call_upstream_llm(messages: list, model: str, max_tokens: int, tools: list) 
 
 def run_llm_with_tools(messages: list, model: str, max_tokens: int, rep: str = "",
                        before_lookup=None, trace: list | None = None,
-                       visuals: list | None = None) -> str:
+                       visuals: list | None = None, call: str = "") -> str:
     """The tool-calling loop that used to run on ElevenLabs' side: ask the
     model, execute anything it asks for ourselves, feed the result back, and
     repeat until it answers in plain text (or we hit the round cap).
@@ -2377,7 +2619,7 @@ def run_llm_with_tools(messages: list, model: str, max_tokens: int, rep: str = "
     from the lookups (see take_visuals); the answer comes back without them.
     """
     history = list(messages)
-    answer = without_tool_markup(_tool_loop(history, model, max_tokens, rep, before_lookup))
+    answer = without_tool_markup(_tool_loop(history, model, max_tokens, rep, before_lookup, call))
     answer = fact_checked(answer, history, model, max_tokens, rep)
     if trace is not None:
         trace.extend(history[len(messages):])
@@ -2437,13 +2679,13 @@ def _place_words(text: str) -> str:
     return words
 
 
-def _tool_loop(history: list, model: str, max_tokens: int, rep: str, before_lookup) -> str:
+def _tool_loop(history: list, model: str, max_tokens: int, rep: str, before_lookup, call_id: str = "") -> str:
     """run_llm_with_tools' loop, appending every exchange to `history`."""
     # lookup_visit_plan replaces the pitch list for "what should I pitch": its due
     # and win-back sections are the pitch list's own rows. Offering both, the
     # model would reach for the old one-list answer.
     tools = [openai_tool_schema(s) for s in tool_specs() if s["name"] != "lookup_pitch_list"]
-    tools += [VISIT_PLAN_TOOL, CHECK_PRODUCT_TOOL, PLAN_ITEM_TOOL]
+    tools += [VISIT_PLAN_TOOL, CHECK_PRODUCT_TOOL, PLAN_ITEM_TOOL, SAVE_FEEDBACK_TOOL]
     if search_key():
         tools.append(WEB_SEARCH_TOOL)
 
@@ -2496,6 +2738,8 @@ def _tool_loop(history: list, model: str, max_tokens: int, rep: str, before_look
         # "Let me check" before a question back to the rep would be a promise
         # of a lookup that is not going to happen.
         asking = all(unsaid_start(*parsed_call(c), history) for c in calls)
+        # Nor before saving feedback: "Let me check. Thanks for that" is not a lookup.
+        asking = asking or all(parsed_call(c)[0] == "save_feedback" for c in calls)
         if not asking and before_lookup and before_lookup(message.get("content") or "") is False:
             return ""
         history.append(message)
@@ -2516,6 +2760,14 @@ def _tool_loop(history: list, model: str, max_tokens: int, rep: str, before_look
                     args = {}
                 value = "%s: %s" % (args.get("customer_key"), args.get("product_words"))
                 result = check_store_product(args if isinstance(args, dict) else {}, rep)
+            elif name == "save_feedback":
+                try:
+                    args = json.loads((call.get("function") or {}).get("arguments") or "{}")
+                except ValueError:
+                    args = {}
+                args = args if isinstance(args, dict) else {}
+                value = "%s: %s" % (args.get("rating"), (args.get("comment") or "")[:60])
+                result = save_spoken_feedback(args, history, rep, call_id)
             elif name == "lookup_plan_item":
                 try:
                     args = json.loads((call.get("function") or {}).get("arguments") or "{}")
@@ -2759,6 +3011,31 @@ class Handler(BaseHTTPRequestHandler):
         raw = json.dumps(payload).encode("utf-8")
         self._send(status, raw, "application/json; charset=utf-8")
 
+    def _handle_feedback(self) -> None:
+        """A rep's rating of one answer, from the page. Signed-in reps only;
+        the cookie is SameSite=Strict, so another site cannot post one."""
+        user = self._user()
+        if not user:
+            self._json(401, {"error": "Sign in first."})
+            return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if length <= 0 or length > FEEDBACK_MAX_BYTES:
+            self._json(400, {"error": "Bad request."})
+            return
+        try:
+            body = json.loads(self.rfile.read(length).decode("utf-8", "replace"))
+        except ValueError:
+            body = None
+        if not isinstance(body, dict) or body.get("rating") not in ("up", "down"):
+            self._json(400, {"error": "Bad request."})
+            return
+        record = feedback_record(body, user)
+        threading.Thread(target=save_feedback, args=(record,), daemon=True).start()
+        self._json(200, {"ok": True})
+
     # ---------- identity ----------
 
     def _client(self) -> str:
@@ -2847,6 +3124,10 @@ class Handler(BaseHTTPRequestHandler):
         # session cookie every /api/* route requires.
         if route == "/llm/v1/chat/completions":
             self._handle_llm_proxy()
+            return
+
+        if route == "/api/feedback":
+            self._handle_feedback()
             return
 
         if route != "/login":
@@ -3266,7 +3547,7 @@ class Handler(BaseHTTPRequestHandler):
         visuals: list = []
         try:
             answer = run_llm_with_tools(with_display_style(with_evidence(call, messages)),
-                                        model, max_tokens, rep, before_lookup, exchange, visuals)
+                                        model, max_tokens, rep, before_lookup, exchange, visuals, call)
         except UpstreamError as exc:
             sys.stderr.write("  LLM proxy upstream error: %s\n" % exc.message)
             answer = "I'm sorry, I ran into a problem answering that."

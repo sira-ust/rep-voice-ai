@@ -165,7 +165,7 @@ Boun That Luang,Lao,Coconut Rice Cakes (Khanom Khao Niew Moon),Palm Sugar,palm s
 Guru Nanak Gurpurab,Indian / Sikh,Langar (Community Meal),Basmati Rice,long grain rice,5,Served as the main carbohydrate accompaniment to lentil dishes.,model,no
 Thanksgiving,American,Stuffing and Dressing,Chicken broth,chicken broth,3,Provides moisture and flavor to the bread cubes.,model,no
 Thanksgiving,American,Pumpkin Pie,Sweetened condensed milk,condensed milk,2,Used to add creaminess and sweetness to various dessert fillings.,model,no
-Hmong New Year,Hmong,Sticky Rice (Ntxiv)**,Glutinous Rice,glutinous rice|sweet rice,29,The essential base for many traditional Hmong celebratory desserts.,model,no
+Hmong New Year,Hmong,Sticky Rice (Ntxiv)**,Glutinous Rice,glutinous rice|sweet rice,29,The essential base for many traditional Hmong celebratory desserts.,rep,yes
 Hmong New Year,Hmong,Sticky Rice (Ntxiv)**,Coconut Milk,coconut milk,23,"Used to create sweet, creamy rice puddings and desserts.",model,no
 Hmong New Year,Hmong,Hmong Sausage / Traditional Meats,Dried Seasoning Packets,spice mix,3,Used to season meat for traditional sausage making.,model,no
 Hmong New Year,Hmong,Traditional Noodles,Soy Sauce,soy sauce,47,A fundamental seasoning for noodle dishes and marinades.,model,no
@@ -190,3 +190,4 @@ New Year's Eve,Filipino / Hispanic / American,Lechon Kawali / Crispy Pork (Sides
 New Year's Eve,Filipino / Hispanic / American,Media Noche (Filipino Feast),Sweet Style Spaghetti Sauce,spaghetti sauce|sweet sauce,15,Used for the traditional Filipino sweet-style spaghetti served at celebrations.,model,no
 New Year's Eve,Filipino / Hispanic / American,Media Noche (Filipino Feast),Condensed Milk,condensed milk,2,Used to sweeten fruit salads and desserts.,model,no
 New Year's Eve,Filipino / Hispanic / American,Media Noche (Filipino Feast),Evaporated Milk,evaporated milk,1,Used as a creamy base for festive desserts and salads.,model,no
+Hmong New Year,Hmong,Rice for the New Year feast,Jasmine rice,jasmine rice|calrose rice,0,"Everyday rice for the large family meals and community feasts (sales rep: DF Jasmine, Pink Lotus)",rep,yes

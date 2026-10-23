@@ -332,18 +332,36 @@ function map(v) {
 // rows. The voice gives a summary; this is the whole of it, so nothing the
 // agent had no time to say is lost. The agent's lead picks are marked.
 
+// A family line -- "Sweet rice · Dragonfly, Apple" and its reason -- with the
+// sizes and brands behind it one tap away: the rep picks what suits the store.
 function planItems(items) {
   const list = node("ul", "vplan-items");
   for (const it of items || []) {
     const li = node("li", it.lead ? "lead" : it.warn ? "warn" : null);
     const head = node("div", "vplan-item");
     head.append(node("strong", null, it.label || ""));
+    if (it.brands) head.append(node("span", "vplan-brands", it.brands));
     if (it.lead) head.append(node("span", "vplan-tag", "Lead with"));
     if (it.warn) head.append(node("span", "vplan-tag vplan-tag-warn", "Out of stock"));
     li.append(head);
-    // The detail opens with the item's name, already shown in bold.
-    const detail = (it.detail || "").replace(/^[^:]*:\s*/, "");
+    // A single item's detail opens with its name, already shown in bold.
+    const detail = Array.isArray(it.children) ? it.detail || "" : (it.detail || "").replace(/^[^:]*:\s*/, "");
     if (detail) li.append(node("div", "vplan-detail", detail));
+    if (Array.isArray(it.children) && it.children.length) {
+      const sizes = node("details", "vplan-sizes");
+      const n = it.children.length;
+      sizes.append(node("summary", null, n === 1 ? "1 item" : `${n} items`));
+      const sub = node("ul", "vplan-children");
+      for (const c of it.children) {
+        const row = node("li", c.warn ? "warn" : null);
+        row.append(node("span", "vplan-child-name", c.label || ""));
+        const d = (c.detail || "").replace(/^[^:]*:\s*/, "");
+        if (d) row.append(node("div", "vplan-detail", d));
+        sub.append(row);
+      }
+      sizes.append(sub);
+      li.append(sizes);
+    }
     list.append(li);
   }
   return list;
@@ -408,8 +426,16 @@ export function visualToText(v) {
   const lines = v.title ? [v.title] : [];
   const items = (list, indent) => (list || []).forEach((it) => {
     const tags = [it.lead ? "LEAD WITH" : "", it.warn ? "OUT OF STOCK" : ""].filter(Boolean).join(", ");
-    const detail = (it.detail || "").replace(/^[^:]*:\s*/, "");
-    lines.push(`${indent}- ${it.label}${tags ? ` [${tags}]` : ""}${detail ? `: ${detail}` : ""}`);
+    const family = Array.isArray(it.children);
+    const detail = family ? it.detail || "" : (it.detail || "").replace(/^[^:]*:\s*/, "");
+    const brands = it.brands ? ` (${it.brands})` : "";
+    lines.push(`${indent}- ${it.label}${brands}${tags ? ` [${tags}]` : ""}${detail ? `: ${detail}` : ""}`);
+    if (family) {
+      for (const c of it.children) {
+        const d = (c.detail || "").replace(/^[^:]*:\s*/, "");
+        lines.push(`${indent}    · ${c.label}${d ? `: ${d}` : ""}`);
+      }
+    }
   });
   if (v.type === "plan") {
     if (v.note) lines.push(v.note);

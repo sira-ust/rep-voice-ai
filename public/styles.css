@@ -972,6 +972,29 @@ input[type="range"]::-moz-range-thumb {
 .vline-axis { font-size: 9.5px; fill: var(--text-2); font-family: var(--font); }
 
 /* table: scrolls sideways inside the card, never the page */
+/* Rating under each answer: small, out of the way, big enough for a thumb. */
+.feedback { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -2px 0 2px 4px; font-size: 12px; color: var(--text-2); }
+.feedback-btn {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 999px;
+  min-width: 40px; height: 32px; font-size: 15px; cursor: pointer;
+}
+.feedback-btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+.feedback-note { font-size: 11.5px; color: var(--text-2); }
+.feedback-form { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+.feedback-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.feedback-chip {
+  font: inherit; font-size: 11.5px; padding: 5px 9px; border-radius: 999px; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--line); color: var(--text);
+}
+.feedback-chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.feedback-comment {
+  font: inherit; font-size: 12.5px; padding: 6px 8px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--text); resize: vertical;
+}
+.feedback-tools { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+.feedback-mic { font-size: 14px; }
+.feedback-mic[aria-pressed="true"] { border-color: var(--danger); background: rgba(214, 88, 79, 0.12); }
+
 .transcript-tools {
   display: flex;
   justify-content: flex-end;
@@ -1001,6 +1024,12 @@ input[type="range"]::-moz-range-thumb {
   border: 1px solid var(--accent); border-radius: 999px; padding: 0 6px;
 }
 .vplan-tag-warn { color: var(--warn-text); border-color: var(--warn); }
+.vplan-brands { font-size: 12px; color: var(--text-2); }
+.vplan-brands::before { content: "· "; }
+.vplan-sizes { margin-top: 2px; }
+.vplan-sizes > summary { cursor: pointer; font-size: 11.5px; color: var(--accent); }
+.vplan-children { list-style: none; margin: 3px 0 0; padding: 0 0 0 10px; display: flex; flex-direction: column; gap: 3px; }
+.vplan-child-name { font-size: 12px; font-weight: 600; }
 
 .vtable-wrap { overflow-x: auto; }
 .vtable { border-collapse: collapse; width: 100%; font-size: 12.5px; }

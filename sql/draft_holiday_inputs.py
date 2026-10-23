@@ -132,6 +132,12 @@ def draft_products() -> int:
                          "source": "model", "confirmed": "no"})
         print(" %d of %d products match our catalog" % (kept, len(drafted)))
     path = HERE / "holiday_products.csv"
+    # A rep's rows stand: a redraft replaces only what the model wrote.
+    if path.is_file():
+        with path.open(encoding="utf-8-sig", newline="") as f:
+            kept = [r for r in csv.DictReader(f) if (r.get("source") or "").lower() == "rep"]
+        drafted = {(r["holiday"], r["product"].lower()) for r in kept}
+        rows = kept + [r for r in rows if (r["holiday"], r["product"].lower()) not in drafted]
     with path.open("w", encoding="utf-8-sig", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0]))
         writer.writeheader()
