@@ -439,8 +439,9 @@ async function startConversation() {
     // through to our own LLM endpoint untouched.
     let scopeToken = "";
     let callId = "";
+    let account = "";
     try {
-      ({ scopeToken, callId } = await getJSON(`/api/scope?rep=${encodeURIComponent(rep)}`));
+      ({ scopeToken, callId, user: account } = await getJSON(`/api/scope?rep=${encodeURIComponent(rep)}`));
     } catch (err) {
       log("err", "scope token failed", err.message || String(err));
     }
@@ -453,6 +454,9 @@ async function startConversation() {
       textOnly: false,
       dynamicVariables: { rep_name: rep || "All" },
       customLlmExtraBody: { scope_token: scopeToken },
+      // The sign-in account, shown as the user on the conversation in
+      // ElevenLabs' history, so each call says who was speaking.
+      ...(account ? { userId: account } : {}),
 
       onConnect: ({ conversationId }) => {
         log("cb", "onConnect", conversationId);

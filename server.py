@@ -232,6 +232,13 @@ def live_open(user: str) -> str:
     return call
 
 
+def call_user(call: str) -> str:
+    """The sign-in account that started this call, or "" if unknown."""
+    with _live_lock:
+        entry = _live_calls.get(call) if call else None
+        return (entry or {}).get("user") or ""
+
+
 def live_publish_user_turn(call: str, text: str) -> int:
     """The rep's latest words, for the page that owns `call`.
 
@@ -2024,7 +2031,7 @@ def save_spoken_feedback(args: dict, history: list, rep: str, call: str) -> str:
             break
     record = feedback_record({"rating": rating, "comment": args.get("comment"), "question": question,
                               "spoken": answer, "screen": answer, "rep": rep, "call": call,
-                              "mode": "spoken"}, "voice: " + (rep or "unknown"))
+                              "mode": "spoken"}, call_user(call) or "voice: " + (rep or "unknown"))
     threading.Thread(target=save_feedback, args=(record,), daemon=True).start()
     return json.dumps({"saved": True, "note": "Thank the rep in a few words and carry on."})
 
@@ -2793,8 +2800,8 @@ def _tool_loop(history: list, model: str, max_tokens: int, rep: str, before_look
                                  or [i for s in (parsed.get("ideas") or {}).values() for i in s]))
             except ValueError:
                 outcome = "unreadable"
-            sys.stderr.write("  TOOL %s(%r) as %s -> %s\n"
-                             % (name, value, rep or "All reps", outcome))
+            sys.stderr.write("  TOOL %s(%r) as %s user=%s -> %s\n"
+                             % (name, value, rep or "All reps", call_user(call_id) or "-", outcome))
             history.append({
                 "role": "tool",
                 "tool_call_id": call.get("id"),
@@ -3336,8 +3343,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": "Unknown rep"})
                 return
             call = live_open(self._user())
+            self._audit("call", "%s as %s" % (call, wanted or "All reps"))
+            # The account goes back to the page, which tags the ElevenLabs
+            # conversation with it: their history then says who was speaking.
             self._json(200, {"scopeToken": auth.issue_scope(wanted, call=call),
-                             "rep": wanted, "callId": call})
+                             "rep": wanted, "callId": call, "user": self._user() or ""})
             return
 
         if route == "/api/live":
