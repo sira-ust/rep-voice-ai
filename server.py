@@ -232,6 +232,13 @@ def live_open(user: str) -> str:
     return call
 
 
+def call_user(call: str) -> str:
+    """The sign-in account that started this call, or "" if unknown."""
+    with _live_lock:
+        entry = _live_calls.get(call) if call else None
+        return (entry or {}).get("user") or ""
+
+
 def live_publish_user_turn(call: str, text: str) -> int:
     """The rep's latest words, for the page that owns `call`.
 
@@ -2024,7 +2031,7 @@ def save_spoken_feedback(args: dict, history: list, rep: str, call: str) -> str:
             break
     record = feedback_record({"rating": rating, "comment": args.get("comment"), "question": question,
                               "spoken": answer, "screen": answer, "rep": rep, "call": call,
-                              "mode": "spoken"}, "voice: " + (rep or "unknown"))
+                              "mode": "spoken"}, call_user(call) or "voice: " + (rep or "unknown"))
     threading.Thread(target=save_feedback, args=(record,), daemon=True).start()
     return json.dumps({"saved": True, "note": "Thank the rep in a few words and carry on."})
 
@@ -2793,8 +2800,8 @@ def _tool_loop(history: list, model: str, max_tokens: int, rep: str, before_look
                                  or [i for s in (parsed.get("ideas") or {}).values() for i in s]))
             except ValueError:
                 outcome = "unreadable"
-            sys.stderr.write("  TOOL %s(%r) as %s -> %s\n"
-                             % (name, value, rep or "All reps", outcome))
+            sys.stderr.write("  TOOL %s(%r) as %s user=%s -> %s\n"
+                             % (name, value, rep or "All reps", call_user(call_id) or "-", outcome))
             history.append({
                 "role": "tool",
                 "tool_call_id": call.get("id"),
@@ -3085,6 +3092,14 @@ class Handler(BaseHTTPRequestHandler):
     def _lock_to_rep(self, userid: str) -> None:
         """A new session for the same user, locked to the rep the PDA named.
         A different ID on a shared PDA replaces the last rep's lock."""
+        own = account_rep(self._user())
+        if own:
+            # A rep's own account stays theirs: a userid in the address cannot
+            # move it to another rep's accounts.
+            if (rep_by_code(userid) or {}).get("code") != own:
+                self._audit("pda_rep_ignored", "%s (account is %s)" % (userid, own))
+            self._redirect("/")
+            return
         rep = rep_by_code(userid)
         if not rep:
             # Locked all the same -- to a code that matches no rep, so it reads
@@ -3230,13 +3245,17 @@ class Handler(BaseHTTPRequestHandler):
         # rep's ID waited here, so the session is locked to them from the start
         # and they never see the open rep list.
         pending = urllib.parse.unquote(jar[PENDING_REP_COOKIE].value) if PENDING_REP_COOKIE in jar else ""
+        # A rep's own account is locked to them, whatever ID was waiting.
+        own = account_rep(username)
+        if own:
+            pending = ""
         rep = rep_by_code(pending) if pending else None
         if rep:
             sys.stderr.write("  AUDIT user=%s ip=%s pda_rep %s (%s)\n"
                              % (username, self._client(), rep["code"], rep["name"]))
         # An ID the directory does not know still locks, to no one's data.
         cookie = self._session_cookie(auth.issue_session(
-            username, rep["code"] if rep else ("?" + pending if pending else "")))
+            username, own or (rep["code"] if rep else ("?" + pending if pending else ""))))
         wanted = "/" + (jar[AFTER_LOGIN_COOKIE].value if AFTER_LOGIN_COOKIE in jar else "")
         target = wanted if _RETURN_PAGE.match(wanted) else "/"
         if pending and not rep:
@@ -3324,8 +3343,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": "Unknown rep"})
                 return
             call = live_open(self._user())
+            self._audit("call", "%s as %s" % (call, wanted or "All reps"))
+            # The account goes back to the page, which tags the ElevenLabs
+            # conversation with it: their history then says who was speaking.
             self._json(200, {"scopeToken": auth.issue_scope(wanted, call=call),
-                             "rep": wanted, "callId": call})
+                             "rep": wanted, "callId": call, "user": self._user() or ""})
             return
 
         if route == "/api/live":
@@ -3349,7 +3371,8 @@ class Handler(BaseHTTPRequestHandler):
             if locked:
                 # The PDA's rep and no one else: the page shows their name
                 # in place of the list.
-                self._json(200, {"reps": [locked], "locked": locked})
+                self._json(200, {"reps": [locked], "locked": locked,
+                                 "via": "account" if account_rep(self._user()) else "pda"})
                 return
             reps = sales_reps()
             payload = {"reps": reps}
@@ -3684,6 +3707,27 @@ def rep_by_code(code: str) -> dict | None:
         return None
     norm = lambda c: str(int(c)) if str(c).isdigit() else str(c).strip().upper()  # noqa: E731
     return next((r for r in sales_reps() if norm(r["code"]) == norm(want)), None)
+
+
+def account_rep(username: str) -> str:
+    """The rep a sign-in account belongs to, or "" for a shared one.
+
+    An account named "rep" and a sales code ("rep032") is that rep's own, for
+    a browser on a computer: locked to them like the PDA, it reads only their
+    accounts. Any other name ("testuser") is open, with the rep list.
+    """
+    name = str(username or "").strip()
+    if name[:3].lower() != "rep" or not name[3:]:
+        return ""
+    name = name[3:]
+    rep = rep_by_code(name)
+    if rep:
+        return rep["code"]
+    # The directory may be unreachable at sign-in; a numeric name is still a
+    # rep's account, and locks to that code rather than opening up.
+    return name.zfill(3) if name.isdigit() else ""
+
+
 _RETURN_PAGE = re.compile(r"^/[A-Za-z0-9_-]+\.html$")
 
 

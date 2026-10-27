@@ -65,6 +65,11 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, stored: str) -> bool:
+    # Typed straight into .env during development ("rep032:<password>"):
+    # anything that is not a scrypt hash is the password itself. Easier to set
+    # and change, but readable by anyone who sees the file.
+    if not stored.startswith("scrypt$"):
+        return hmac.compare_digest(password.encode("utf-8"), stored.encode("utf-8"))
     try:
         scheme, salt_b64, hash_b64 = stored.split("$", 2)
         if scheme != "scrypt":
