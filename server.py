@@ -3702,11 +3702,14 @@ def rep_by_code(code: str) -> dict | None:
 def account_rep(username: str) -> str:
     """The rep a sign-in account belongs to, or "" for a shared one.
 
-    An account named after a sales code ("032") is that rep's own, for a
-    browser on a computer: locked to them like the PDA, it reads only their
+    An account named "rep" and a sales code ("rep032") is that rep's own, for
+    a browser on a computer: locked to them like the PDA, it reads only their
     accounts. Any other name ("testuser") is open, with the rep list.
     """
     name = str(username or "").strip()
+    if name[:3].lower() != "rep" or not name[3:]:
+        return ""
+    name = name[3:]
     rep = rep_by_code(name)
     if rep:
         return rep["code"]
