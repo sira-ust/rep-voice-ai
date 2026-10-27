@@ -3085,6 +3085,14 @@ class Handler(BaseHTTPRequestHandler):
     def _lock_to_rep(self, userid: str) -> None:
         """A new session for the same user, locked to the rep the PDA named.
         A different ID on a shared PDA replaces the last rep's lock."""
+        own = account_rep(self._user())
+        if own:
+            # A rep's own account stays theirs: a userid in the address cannot
+            # move it to another rep's accounts.
+            if (rep_by_code(userid) or {}).get("code") != own:
+                self._audit("pda_rep_ignored", "%s (account is %s)" % (userid, own))
+            self._redirect("/")
+            return
         rep = rep_by_code(userid)
         if not rep:
             # Locked all the same -- to a code that matches no rep, so it reads
@@ -3230,13 +3238,17 @@ class Handler(BaseHTTPRequestHandler):
         # rep's ID waited here, so the session is locked to them from the start
         # and they never see the open rep list.
         pending = urllib.parse.unquote(jar[PENDING_REP_COOKIE].value) if PENDING_REP_COOKIE in jar else ""
+        # A rep's own account is locked to them, whatever ID was waiting.
+        own = account_rep(username)
+        if own:
+            pending = ""
         rep = rep_by_code(pending) if pending else None
         if rep:
             sys.stderr.write("  AUDIT user=%s ip=%s pda_rep %s (%s)\n"
                              % (username, self._client(), rep["code"], rep["name"]))
         # An ID the directory does not know still locks, to no one's data.
         cookie = self._session_cookie(auth.issue_session(
-            username, rep["code"] if rep else ("?" + pending if pending else "")))
+            username, own or (rep["code"] if rep else ("?" + pending if pending else ""))))
         wanted = "/" + (jar[AFTER_LOGIN_COOKIE].value if AFTER_LOGIN_COOKIE in jar else "")
         target = wanted if _RETURN_PAGE.match(wanted) else "/"
         if pending and not rep:
@@ -3349,7 +3361,8 @@ class Handler(BaseHTTPRequestHandler):
             if locked:
                 # The PDA's rep and no one else: the page shows their name
                 # in place of the list.
-                self._json(200, {"reps": [locked], "locked": locked})
+                self._json(200, {"reps": [locked], "locked": locked,
+                                 "via": "account" if account_rep(self._user()) else "pda"})
                 return
             reps = sales_reps()
             payload = {"reps": reps}
@@ -3684,6 +3697,24 @@ def rep_by_code(code: str) -> dict | None:
         return None
     norm = lambda c: str(int(c)) if str(c).isdigit() else str(c).strip().upper()  # noqa: E731
     return next((r for r in sales_reps() if norm(r["code"]) == norm(want)), None)
+
+
+def account_rep(username: str) -> str:
+    """The rep a sign-in account belongs to, or "" for a shared one.
+
+    An account named after a sales code ("032") is that rep's own, for a
+    browser on a computer: locked to them like the PDA, it reads only their
+    accounts. Any other name ("testuser") is open, with the rep list.
+    """
+    name = str(username or "").strip()
+    rep = rep_by_code(name)
+    if rep:
+        return rep["code"]
+    # The directory may be unreachable at sign-in; a numeric name is still a
+    # rep's account, and locks to that code rather than opening up.
+    return name.zfill(3) if name.isdigit() else ""
+
+
 _RETURN_PAGE = re.compile(r"^/[A-Za-z0-9_-]+\.html$")
 
 

@@ -1192,12 +1192,15 @@ async function loadReps() {
     el.repSelect.replaceChildren(option);
     el.repSelect.value = option.value;
     el.repSelect.hidden = true;
-    // Nor does a PDA rep pick the agent: that is set up for them. And no sign
-    // out: the app signed in for them, and they have no password to come back.
+    // Nor does a rep pick the agent: that is set up for them. On the PDA, no
+    // sign out either: the app signed in for them, and they have no password
+    // to come back with. A rep's own account on a computer keeps it.
     if (el.agentGroup) el.agentGroup.hidden = true;
+    const onPda = data.via !== "account";
     const signOut = document.getElementById("signOut");
-    if (signOut) signOut.hidden = true;
-    el.keyNote.textContent = `Signed in on the PDA as ${option.textContent}.`;
+    if (signOut) signOut.hidden = onPda;
+    el.keyNote.textContent = onPda ? `Signed in on the PDA as ${option.textContent}.`
+                                   : `Signed in as ${option.textContent}.`;
     const shown = document.createElement("div");
     shown.className = "rep-locked";
     shown.textContent = option.textContent;
