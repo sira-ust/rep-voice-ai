@@ -257,6 +257,27 @@ body {
 
 .btn-primary.is-live:hover:not(:disabled) { background: rgba(214, 88, 79, 0.18); }
 
+/* Hold to talk. Held with a thumb on the move: no text selection, no
+   long-press menu, no browser gestures stealing the press. */
+.btn-talk {
+  background: var(--accent);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 800;
+  box-shadow: 0 8px 18px -8px rgba(33, 150, 243, 0.55);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn-talk[hidden] { display: none; }
+.btn-talk.is-pressed {
+  background: var(--pda-blue-d);
+  box-shadow: 0 0 0 4px rgba(33, 150, 243, 0.3);
+  transform: scale(0.98);
+}
+
 .btn-ghost {
   background: var(--surface-3);
   border-color: var(--line);
@@ -1179,17 +1200,22 @@ input[type="range"]::-moz-range-thumb {
   #callBtn { grid-area: call; width: 100%; min-height: 48px; padding: 10px 16px; }
   .controls { grid-area: ctrl; width: auto; padding: 0; gap: 0; }
   .controls .gauge { display: none; }
-  #muteBtn { width: 48px; height: 48px; border-radius: 999px; }
+
 
   /* In a call: who you are is locked anyway, so the picker gives its space
-     to the answers -- the card is down to one row of status and two buttons. */
+     to the answers -- the card is down to a row of status and End call, and
+     the hold-to-talk button under it. Push to talk is the mute, so the mute
+     button goes. */
   body[data-call="live"] #repField,
   body[data-call="busy"] #repField { display: none; }
+  body[data-call="live"] .controls,
+  body[data-call="busy"] .controls { display: none; }
   body[data-call="live"] .stage,
   body[data-call="busy"] .stage {
-    grid-template-columns: auto 1fr auto auto;
-    grid-template-areas: "orb label call ctrl";
+    grid-template-columns: auto 1fr auto;
+    grid-template-areas: "orb label call" "talk talk talk";
   }
+  #talkBtn { grid-area: talk; width: 100%; min-height: 64px; }
   body[data-call="live"] #callBtn,
   body[data-call="busy"] #callBtn { width: auto; padding: 10px 14px; font-size: 13.5px; }
   body[data-call="live"] #callBtn .mic-icon,

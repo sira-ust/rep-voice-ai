@@ -177,14 +177,19 @@
         <span id="callBtnLabel">Start conversation</span>
       </button>
 
-      <div class="controls">
-        <button class="icon-btn" id="muteBtn" title="Mute microphone" aria-label="Mute microphone" disabled>
-          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
-            <rect x="9" y="2" width="6" height="11" rx="3"/>
-            <path d="M5 10a7 7 0 0 0 14 0M12 17v5"/>
-          </svg>
-        </button>
+      <!-- Push to talk: the mic is live only while this is held (or the space
+           bar, on a computer). Shown during a call. -->
+      <button class="btn btn-talk" id="talkBtn" hidden aria-label="Hold to talk">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <rect x="9" y="2" width="6" height="11" rx="3"/>
+          <path d="M5 10a7 7 0 0 0 14 0M12 17v5"/>
+        </svg>
+        <span id="talkBtnLabel">Hold to talk</span>
+      </button>
 
+      <!-- No mute button: with push to talk, the mic is off unless the talk
+           button is held. -->
+      <div class="controls">
         <div class="gauge" title="Microphone input level">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
             <rect x="9" y="2" width="6" height="11" rx="3"/>
