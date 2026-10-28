@@ -32,7 +32,8 @@ const el = {
   repNote: $("repNote"),
   callBtn: $("callBtn"),
   callBtnLabel: $("callBtnLabel"),
-  muteBtn: $("muteBtn"),
+  talkBtn: $("talkBtn"),
+  talkBtnLabel: $("talkBtnLabel"),
   volumeSlider: $("volumeSlider"),
   meterFill: $("meterFill"),
   transcript: $("transcript"),
@@ -56,7 +57,11 @@ const state = {
   conversation: null,
   status: "disconnected", // disconnected | connecting | connected | disconnecting
   mode: "listening",
-  muted: false,
+  // Push to talk: the button (or space bar) is held, so the mic is live.
+  talking: false,
+  // The rep talked over the agent: its voice is silenced until it stops.
+  cutOff: false,
+  hint: "",
   meterTimer: null,
   config: { hasApiKey: false, agentId: "" },
   // Live agent reply being streamed in, so an aborted turn still shows text.
@@ -278,15 +283,18 @@ function render() {
     el.modeLabel.textContent = STATUS_LABEL[status];
   } else if (live) {
     el.orb.classList.add(mode === "speaking" ? "speaking" : "listening");
-    el.modeLabel.textContent =
-      mode === "speaking" ? "Agent is speaking" : state.muted ? "Microphone muted" : "Listening…";
+    el.modeLabel.textContent = state.talking
+      ? "Listening… let go when you're done"
+      : mode === "speaking"
+        ? "Agent is speaking · hold to interrupt"
+        : state.hint || "Hold the button to talk";
   } else {
-    el.modeLabel.textContent = "Tap to start talking";
+    el.modeLabel.textContent = "Tap Start, then hold to talk";
   }
 
-  el.muteBtn.disabled = !live;
-  el.muteBtn.classList.toggle("active", state.muted);
-  el.muteBtn.title = state.muted ? "Unmute microphone" : "Mute microphone";
+  el.talkBtn.hidden = !live;
+  el.talkBtn.classList.toggle("is-pressed", state.talking);
+  el.talkBtnLabel.textContent = state.talking ? "Let go to send" : "Hold to talk";
   el.agentSelect.disabled = live;
   el.agentIdInput.disabled = live;
 }
@@ -462,6 +470,7 @@ async function startConversation() {
         log("cb", "onConnect", conversationId);
         state.conversationId = conversationId;
         setStatus("connected");
+        setMic(false);            // push to talk: off until the button is held
         addMessage(`Connected · ${conversationId}`, "system");
         startMeter();
         applyVolume();
@@ -526,7 +535,7 @@ async function startConversation() {
       onModeChange: ({ mode }) => {
         log("cb", "onModeChange", mode);
         state.mode = mode;
-        holdMicWhileSpeaking(mode);
+        afterModeChange(mode);
         render();
       },
 
@@ -590,8 +599,11 @@ async function startConversation() {
       onPing: (info) => log("in", "ping", info && info.ping_ms),
     });
 
-    // onConnect can fire before startSession resolves, so set volume here too.
+    // onConnect can fire before startSession resolves, so set volume and the
+    // mic here too.
     applyVolume();
+    if (!state.talking) setMic(false);
+    armIdleHangUp();
     log("out", "session started", state.conversation.getId?.());
   } catch (err) {
     closeLiveTranscript();
@@ -755,7 +767,11 @@ function teardown() {
   closeLiveTranscript();
   state.conversation = null;
   state.mode = "listening";
-  state.muted = false;
+  state.talking = false;
+  state.cutOff = false;
+  state.hint = "";
+  clearTimeout(micOffTimer);
+  clearTimeout(idleTimer);
   state.streaming = { id: null, node: null, text: "" };
   stopMeter();
   setStatus("disconnected");
@@ -763,7 +779,7 @@ function teardown() {
 
 function applyVolume() {
   if (!state.conversation) return;
-  const volume = Number(el.volumeSlider.value) / 100;
+  const volume = state.cutOff ? 0 : Number(el.volumeSlider.value) / 100;
   try {
     state.conversation.setVolume({ volume });
   } catch {
@@ -778,47 +794,123 @@ el.callBtn.addEventListener("click", () => {
   else if (state.status === "disconnected") startConversation();
 });
 
-// The agent heard itself: on a handheld or laptop speaker its reply came back
-// in through the microphone, was transcribed as the rep speaking, and answered.
-// Browser echo cancellation does not catch all of it. So the microphone is off
-// while the agent speaks and comes back a moment after it stops -- the tail of
-// the audio is still in the room. The rep's own mute button wins: a muted mic
-// stays muted. The cost is that the rep cannot talk over the agent; a headset
-// would allow that, and this is where to relax it if one is standard.
-const MIC_BACK_AFTER_MS = 450;
-let micBackTimer = null;
+// ---------------------------------------------------------------- push to talk
+//
+// The mic is live only while the rep holds the talk button, or the space bar
+// on a computer. That keeps store noise and the agent's own voice out -- the
+// agent used to hear itself through the speaker and answer -- and the mic is
+// not listening between questions. Muted, the SDK sends silence, which is how
+// ElevenLabs hears the question end.
+//
+// A call with nothing said for a minute hangs up: a rep who walks off leaves
+// no line open. The minute counts only while the agent is quiet; speaking,
+// or holding the button, starts it again.
+const MIC_TAIL_MS = 300;          // the last word is still arriving at release
+const SHORT_PRESS_MS = 350;       // shorter than this was a tap, not talking
+const IDLE_HANG_UP_MS = 60 * 1000;
+let micOffTimer = null;
+let idleTimer = null;
+let hintTimer = null;
+let pressedAt = 0;
 
-function holdMicWhileSpeaking(mode) {
+function setMic(on) {
   if (!state.conversation || typeof state.conversation.setMicMuted !== "function") return;
-  clearTimeout(micBackTimer);
   try {
-    if (mode === "speaking") {
-      state.conversation.setMicMuted(true);
-    } else {
-      micBackTimer = setTimeout(() => {
-        try {
-          if (state.conversation && state.mode !== "speaking") state.conversation.setMicMuted(state.muted);
-        } catch { /* call ended in the meantime */ }
-      }, MIC_BACK_AFTER_MS);
-    }
+    state.conversation.setMicMuted(!on);
   } catch (err) {
-    log("err", "mic hold", err.message || String(err));
+    log("err", "mic", err.message || String(err));
   }
 }
 
-el.muteBtn.addEventListener("click", () => {
-  if (!state.conversation) return;
-  state.muted = !state.muted;
-  try {
-    // While the agent speaks the mic is held off regardless; the rep's choice
-    // takes effect when it stops.
-    if (state.mode !== "speaking") state.conversation.setMicMuted(state.muted);
-    log("out", "setMicMuted", state.muted);
-  } catch {
-    showError("This SDK build does not support muting; end the call to stop the microphone.");
-    state.muted = false;
+function startTalking() {
+  if (!state.conversation || state.status !== "connected" || state.talking) return;
+  state.talking = true;
+  pressedAt = Date.now();
+  clearTimeout(micOffTimer);
+  clearTimeout(idleTimer);
+  // Talking over the agent: silenced here at once, without waiting for
+  // ElevenLabs to hear the rep and stop it.
+  if (state.mode === "speaking") {
+    state.cutOff = true;
+    applyVolume();
   }
+  setMic(true);
+  log("out", "talk", "pressed");
   render();
+}
+
+function stopTalking() {
+  if (!state.talking) return;
+  state.talking = false;
+  clearTimeout(micOffTimer);
+  micOffTimer = setTimeout(() => setMic(false), MIC_TAIL_MS);
+  if (Date.now() - pressedAt < SHORT_PRESS_MS) {
+    state.hint = "Hold the button while you talk";
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => { state.hint = ""; render(); }, 2500);
+  }
+  log("out", "talk", "released");
+  armIdleHangUp();
+  render();
+}
+
+function afterModeChange(mode) {
+  if (mode === "speaking") {
+    clearTimeout(idleTimer);
+    return;
+  }
+  // The agent stopped -- finished, or cut off by the rep: its voice is back
+  // for the next answer.
+  if (state.cutOff) {
+    state.cutOff = false;
+    applyVolume();
+  }
+  armIdleHangUp();
+}
+
+function armIdleHangUp() {
+  clearTimeout(idleTimer);
+  if (!state.conversation || state.talking || state.mode === "speaking") return;
+  idleTimer = setTimeout(() => {
+    if (!state.conversation || state.talking || state.mode === "speaking") return;
+    log("out", "idle hang-up");
+    addMessage("Call ended after a minute with nothing said. Tap Start conversation to pick up again.", "system");
+    endConversation();
+  }, IDLE_HANG_UP_MS);
+}
+
+el.talkBtn.addEventListener("pointerdown", (event) => {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  try { el.talkBtn.setPointerCapture(event.pointerId); } catch { /* not supported */ }
+  startTalking();
+});
+for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
+  el.talkBtn.addEventListener(type, stopTalking);
+}
+// A long press on a touch screen opens the context menu otherwise.
+el.talkBtn.addEventListener("contextmenu", (event) => event.preventDefault());
+
+// The space bar, on a computer. Not while typing a feedback note, and not as
+// a click on whatever button has focus -- that would have been End call.
+const typingIn = (target) =>
+  target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+window.addEventListener("keydown", (event) => {
+  if (event.code !== "Space" || typingIn(event.target) || state.status !== "connected") return;
+  event.preventDefault();
+  if (document.activeElement instanceof HTMLButtonElement) document.activeElement.blur();
+  if (!event.repeat) startTalking();
+});
+window.addEventListener("keyup", (event) => {
+  if (event.code !== "Space" || !state.talking) return;
+  event.preventDefault();
+  stopTalking();
+});
+// Letting go can happen out of sight: the window loses focus, or the PDA
+// screen locks, mid-press. Either counts as letting go.
+window.addEventListener("blur", stopTalking);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) stopTalking();
 });
 
 el.volumeSlider.addEventListener("input", applyVolume);
