@@ -72,9 +72,12 @@ DBX_WAREHOUSE = os.environ.get("DATABRICKS_WAREHOUSE_ID", "").strip()
 DBX_WARM_TOKEN = (os.environ.get("DATABRICKS_WARM_TOKEN", "").strip()
                   or os.environ.get("DATABRICKS_TOKEN", "").strip())
 try:
-    WARM_EVERY = max(0, int(os.environ.get("DATABRICKS_WARM_MINUTES", "10") or 10)) * 60
+    WARM_EVERY = max(0, int(os.environ.get("DATABRICKS_WARM_MINUTES", "4") or 4)) * 60
 except ValueError:
-    WARM_EVERY = 600
+    WARM_EVERY = 240
+# Never longer than the warehouse's 5-minute auto-stop: a nudge skipped because
+# one went out 7 minutes ago lands on a warehouse that stopped 2 minutes ago.
+WARM_EVERY = min(WARM_EVERY, 240)
 WARM_READY = bool(DBX_HOST and DBX_WAREHOUSE and DBX_WARM_TOKEN)
 
 _warm_lock = threading.Lock()
@@ -126,8 +129,11 @@ def warm_warehouse(reason: str) -> None:
 
 # The page waits for this before it lets a call start, so a rep's first
 # question is not the one that sits through a cold warehouse. A query that
-# answered in the last READY_FOR seconds counts as proof it is awake.
-READY_FOR = 5 * 60
+# answered in the last READY_FOR seconds counts as proof it is awake -- which
+# must be shorter than the warehouse's own auto-stop (5 minutes), or "recently
+# answered" vouches for a warehouse that has already shut down. That is how a
+# rep sat through a minute of "Still checking" on the first question of a call.
+READY_FOR = 4 * 60
 _ready_at = 0.0
 _ready_lock = threading.Lock()
 
@@ -2169,6 +2175,7 @@ def run_tool_call(name: str, value: str, rep: str = "") -> str:
         state = (result.get("status") or {}).get("state")
         if state != "SUCCEEDED":
             return json.dumps({"error": "Databricks returned %s" % state})
+        mark_warehouse_ready()
         cols, rows = common.rows_of(result)
 
         # Nothing found, on a lookup that was narrowed to one rep. Ask again

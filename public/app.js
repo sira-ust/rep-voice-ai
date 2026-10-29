@@ -80,6 +80,9 @@ const state = {
   // arrive many seconds after the page, which sat showing only "All reps" --
   // and a call started then would have run as the manager view.
   loading: true,
+  // True while Start waits for a warehouse that fell asleep after the page
+  // loaded (it stops after 5 idle minutes; a PDA keeps the page open all day).
+  waking: false,
 };
 
 // ---------------------------------------------------------------- debug log
@@ -267,7 +270,7 @@ function render() {
       ? STATUS_LABEL[status]
       : "Start conversation";
 
-  if (state.loading) {
+  if (state.loading || state.waking) {
     el.callBtn.disabled = true;
     if (el.repSelect) el.repSelect.disabled = true;
     el.callBtnLabel.textContent = "Getting ready…";
@@ -278,6 +281,9 @@ function render() {
   if (state.loading) {
     el.orb.classList.add("connecting");
     el.modeLabel.textContent = "Getting ready — loading your reps and waking the data…";
+  } else if (state.waking) {
+    el.orb.classList.add("connecting");
+    el.modeLabel.textContent = "Waking up the data — a few seconds…";
   } else if (busy) {
     el.orb.classList.add("connecting");
     el.modeLabel.textContent = STATUS_LABEL[status];
@@ -789,9 +795,64 @@ function applyVolume() {
 
 // ---------------------------------------------------------------- wiring
 
-el.callBtn.addEventListener("click", () => {
-  if (state.status === "connected") endConversation();
-  else if (state.status === "disconnected") startConversation();
+// ---------------------------------------------------------------- warehouse
+//
+// The data warehouse shuts down after 5 idle minutes, and a lookup on a cold
+// one sat a rep through a minute of "Still checking" with no answer. So no call
+// starts until it answers: on load, again on Start, and again when the screen
+// comes back on. The server says "awake" at once if a query answered in the
+// last 4 minutes, so on a warm warehouse this costs a quick round trip.
+
+const WAKE_TRIES = 3;          // the server waits up to ~50 s per try
+const WAKE_LABEL_AFTER_MS = 400;
+let waking = null;
+
+function ensureWarehouse({ quiet = false } = {}) {
+  if (waking) return waking;
+  waking = (async () => {
+    // Only say "Waking up" if it is not instant, so a warm Start does not flash.
+    const label = quiet ? null : setTimeout(() => { state.waking = true; render(); },
+                                            WAKE_LABEL_AFTER_MS);
+    try {
+      for (let i = 0; i < WAKE_TRIES; i++) {
+        try {
+          const res = await getJSON("/api/ready");
+          if (res && res.ready) {
+            log("out", "ready", `data warehouse awake (${res.detail || "ok"})`);
+            return true;
+          }
+          log("out", "ready", `data warehouse still waking (${(res && res.detail) || "no detail"})`);
+        } catch (err) {
+          log("out", "ready", `check failed: ${(err && err.message) || err}`);
+        }
+      }
+      return false;
+    } finally {
+      clearTimeout(label);
+      state.waking = false;
+      render();
+      waking = null;
+    }
+  })();
+  return waking;
+}
+
+el.callBtn.addEventListener("click", async () => {
+  if (state.status === "connected") return endConversation();
+  if (state.status !== "disconnected" || state.waking) return;
+  if (!(await ensureWarehouse())) {
+    showError("The data isn't answering right now, so the agent couldn't look anything up. Try again in a minute.");
+    return;
+  }
+  if (state.status === "disconnected") startConversation();
+});
+
+// A PDA screen that comes back on is about to be used: wake the data now, so
+// Start is instant by the time the rep reaches it.
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && !state.loading && state.status === "disconnected") {
+    ensureWarehouse({ quiet: true });
+  }
 });
 
 // ---------------------------------------------------------------- push to talk
@@ -1536,13 +1597,13 @@ async function init() {
   const [, , ready] = await Promise.allSettled([
     refreshAgentInfo(),
     loadReps(),
-    getJSON("/api/ready"),
+    ensureWarehouse({ quiet: true }),
   ]);
   if (allOption) allOption.textContent = "All reps (manager view)";
-  const awake = ready.status === "fulfilled" && ready.value && ready.value.ready;
-  log("out", "ready", awake ? "data warehouse awake" : "data warehouse still waking");
+  const awake = ready.status === "fulfilled" && ready.value;
   if (!awake) {
-    showRepNote("The data is still waking up, so the first answer may take a little longer.");
+    // Start checks again before it opens a call, so this is a warning only.
+    showRepNote("The data is slow to wake up. Start will wait for it.");
   }
   state.loading = false;
   render();

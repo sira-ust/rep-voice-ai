@@ -85,7 +85,7 @@ warehouse and nothing more.
 DATABRICKS_HOST=https://adb-xxxx.N.azuredatabricks.net
 DATABRICKS_WAREHOUSE_ID=<warehouse id>
 DATABRICKS_WARM_TOKEN=<minimal service principal token>
-DATABRICKS_WARM_MINUTES=10
+DATABRICKS_WARM_MINUTES=4
 ```
 
 It falls back to `DATABRICKS_TOKEN` if unset. That works, but puts a
