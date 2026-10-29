@@ -1669,6 +1669,9 @@ def unsupported_facts(answer: str, evidence: str) -> list:
             pass
     dates = {(int(a), int(b)) for a, b in _ISO_DATE.findall(evidence)}
     dates |= {(_MONTHS[m[:3].lower()], int(d)) for m, d in _DATE_IN_TEXT.findall(evidence)}
+    # Shares and rates are stored as fractions and spoken as percentages:
+    # 0.049 in the data is "4.9%" or "about 5%" in the answer.
+    fractions = {round(n * 100, 2) for n in numbers if abs(n) <= 1}
     tolerance = {"money": 0.01, "percent": 0.5, "times": 0.05, "count": 0, "number": 0.01}
     missing = []
     for kind, pattern in _FACT_PATTERNS:
@@ -1679,7 +1682,8 @@ def unsupported_facts(answer: str, evidence: str) -> list:
                 continue
             # Whole dollars are rounded on purpose ($936,051 for 936051.40).
             allow = 0.5 if kind in ("money", "number") and "." not in found.group(1) else tolerance[kind]
-            if not any(abs(value - n) <= allow for n in numbers):
+            pool = numbers | fractions if kind == "percent" else numbers
+            if not any(abs(value - n) <= allow for n in pool):
                 missing.append(found.group(0).strip())
     for m, d in _DATE_IN_TEXT.findall(text):
         if (_MONTHS[m[:3].lower()], int(d)) not in dates:
@@ -2207,6 +2211,7 @@ def run_tool_call(name: str, value: str, rep: str = "") -> str:
                     pass        # leave the row as it is rather than fail the lookup
         if name == "lookup_rep_sales":
             add_vs_last_month(records)
+            add_months_ahead(records)
             name_periods(records)
         payload = {"row_count": len(records), "rows": records}
         if name == "lookup_accounts_on_route" and records:
@@ -2346,6 +2351,54 @@ def add_vs_last_month(records: list) -> None:
                 _money(now["sales_projected"]), name_last, _money(last["sales_amount"]))
         now["vs_last_month"] = text + ". There is no percentage change from last month: do not compare " \
                                       "this month's sales so far with last month's total."
+    except (TypeError, ValueError, KeyError):
+        pass
+
+
+def add_months_ahead(records: list) -> None:
+    """Give the current quarter the target left for the months not yet started.
+
+    "What's my target for November?" has no row: only the current and last
+    month do. The quarter's target covers it, and the model, left to subtract
+    this month from the quarter itself, read the whole quarter out as what was
+    left. Worked out here it is also a figure the fact check can find.
+    """
+    import datetime
+    months = [r for r in records if r.get("period_type") == "month"]
+    now = next((r for r in months if str(r.get("is_current")).lower() == "true"), None)
+    last = next((r for r in months if str(r.get("is_current")).lower() != "true"), None)
+    quarter = next((r for r in records if r.get("period_type") == "quarter"
+                    and str(r.get("is_current")).lower() == "true"), None)
+    if not now or not quarter:
+        return
+    try:
+        q_target = _num(quarter["period_target"])
+        q_start = datetime.date.fromisoformat(quarter["period_start"])
+        month = datetime.date.fromisoformat(now["period_start"])
+        # The quarter's months so far, with their targets: this one, and last
+        # month if it is in the same quarter. Only those two have rows.
+        known = [(month, _num(now["period_target"]))]
+        if last and datetime.date.fromisoformat(last["period_start"]) >= q_start:
+            known.insert(0, (datetime.date.fromisoformat(last["period_start"]),
+                             _num(last["period_target"])))
+        if q_target is None or any(t is None for _, t in known):
+            return
+        if month.month - q_start.month + 1 != len(known):
+            return      # a month of the quarter is missing: no sum to trust
+        names = [datetime.date(q_start.year, q_start.month + i, 1).strftime("%B")
+                 for i in range(3) if q_start.month + i > month.month]
+        if not names:
+            return
+        left = q_target - sum(t for _, t in known)
+        so_far = " and ".join("%s's is %s" % (d.strftime("%B"), _money(t)) for d, t in known)
+        if len(names) == 1:
+            ahead = "%s has no target row of its own, but it is the rest of the quarter: the "                     "quarter's target is %s and %s, so %s's comes to %s." % (
+                        names[0], _money(q_target), so_far, names[0], _money(left))
+        else:
+            ahead = "%s have no target of their own. The quarter's target is %s and %s, so "                     "%s together come to %s. How that splits between them is not in the "                     "data -- do not divide it up." % (
+                        " and ".join(names), _money(q_target), so_far, " and ".join(names),
+                        _money(left))
+        quarter["months_ahead"] = ahead
     except (TypeError, ValueError, KeyError):
         pass
 
